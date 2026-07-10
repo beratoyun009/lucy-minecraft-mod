@@ -22,7 +22,7 @@ import net.fabricmc.loader.api.FabricLoader
 object Utils {
 	const val MOD_PROD_BUILD = true
 	const val DEBUG = false
-	val modMetadata = FabricLoader.getInstance().getModContainer("mirage-minecraft-mod").orElse(null)!!.metadata
+	val modMetadata = FabricLoader.getInstance().getModContainer("lucy-restyle-minecraft-mod").orElse(null)!!.metadata
 
 	fun log(message: String) {
 		if (DEBUG) {
@@ -101,6 +101,7 @@ object Utils {
 			"minecraftVersion" to JsonPrimitive(SharedConstants.getGameVersion().name()),
 			"modId" to JsonPrimitive(modMetadata.id),
 			"modVersion" to JsonPrimitive(modMetadata.version.friendlyString),
+			"model" to JsonPrimitive(Http.MODEL_NAME),
 			"osName" to JsonPrimitive(System.getProperty("os.name")),
 			"osArch" to JsonPrimitive(System.getProperty("os.arch")),
 			"cpu" to JsonPrimitive(GLX._getCpuInfo()),

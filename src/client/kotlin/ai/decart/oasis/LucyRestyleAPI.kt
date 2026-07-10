@@ -13,68 +13,68 @@ data class IceCandidate(
 // outgoing messages
 
 @Serializable
-sealed interface MirageOutgoingMessage
+sealed interface LucyRestyleOutgoingMessage
 
 @Serializable
 @SerialName("prompt")
-data class MirageOutgoingPromptMessage(
+data class LucyRestyleOutgoingPromptMessage(
 	val prompt: String,
 	val enhance_prompt: Boolean,
-) : MirageOutgoingMessage
+) : LucyRestyleOutgoingMessage
 
 @Serializable
 @SerialName("offer")
-data class MirageOutgoingOfferMessage(
+data class LucyRestyleOutgoingOfferMessage(
 	val sdp: String,
-) : MirageOutgoingMessage
+) : LucyRestyleOutgoingMessage
 
 @Serializable
 @SerialName("ice-candidate")
-data class MirageOutgoingIceCandidateMessage(
+data class LucyRestyleOutgoingIceCandidateMessage(
 	val candidate: IceCandidate,
-) : MirageOutgoingMessage
+) : LucyRestyleOutgoingMessage
 
 // incoming messages
 
 @Serializable
-sealed interface MirageIncomingMessage
+sealed interface LucyRestyleIncomingMessage
 
 @Serializable
 @SerialName("ice-candidate")
-data class MirageIncomingIceCandidateMessage(
+data class LucyRestyleIncomingIceCandidateMessage(
 	val candidate: IceCandidate,
-) : MirageIncomingMessage
+) : LucyRestyleIncomingMessage
 
 @Serializable
 @SerialName("answer")
-data class MirageIncomingAnswerMessage(
+data class LucyRestyleIncomingAnswerMessage(
 	val sdp: String,
-) : MirageIncomingMessage
+) : LucyRestyleIncomingMessage
 
 @Serializable
 @SerialName("error")
-data class MirageIncomingErrorMessage(
+data class LucyRestyleIncomingErrorMessage(
 	val error: String,
-) : MirageIncomingMessage
+) : LucyRestyleIncomingMessage
 
 @Serializable
 @SerialName("session_id")
-data class MirageIncomingSessionIdMessage(
+data class LucyRestyleIncomingSessionIdMessage(
 	val session_id: String,
 	val server_port: Int,
 	val server_ip: String,
-) : MirageIncomingMessage
+) : LucyRestyleIncomingMessage
 
 @Serializable
 @SerialName("prompt_ack")
-data class MirageIncomingPromptAckMessage(
+data class LucyRestyleIncomingPromptAckMessage(
 	val prompt: String,
 	val success: Boolean,
 	val error: String? = null,
-) : MirageIncomingMessage
+) : LucyRestyleIncomingMessage
 
 @Serializable
 @SerialName("generation_started")
-data class MirageIncomingGenerationStartedMessage(
+data class LucyRestyleIncomingGenerationStartedMessage(
     val dummy: String? = null
-) : MirageIncomingMessage
+) : LucyRestyleIncomingMessage

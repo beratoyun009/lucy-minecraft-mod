@@ -42,7 +42,8 @@ data class SessionConfig(
 data class CreateSessionError(val errorMessages: List<String>) : CreateSessionResponse
 
 object Http {
-	const val CONFIG_URL = "https://oasis2.decart.ai/api/create-session"
+	const val MODEL_NAME = "lucy-restyle-2"
+	const val CONFIG_URL = "https://oasis2.decart.ai/api/create-session?model=lucy-restyle-2"
 
 	const val CONFIG_CONNECT_TIMEOUT_MS = 10_000L
 

@@ -73,7 +73,7 @@ object OasisClient : ClientModInitializer {
 	var currentConfig: SessionConfig? = null
 	var currentRecommendedPrompts: List<Map.Entry<String, String>> = mapOf("" to "").entries.toList()
 
-	var webSocket: JsonWebSocket<MirageIncomingMessage>? = null
+	var webSocket: JsonWebSocket<LucyRestyleIncomingMessage>? = null
 	var peerConnection: RTCPeerConnection? = null
 	var videoSource: CustomVideoSource? = null
 
@@ -269,7 +269,7 @@ object OasisClient : ClientModInitializer {
 		if (!isConnected) {
 			return
 		}
-		webSocket?.sendMessage<MirageOutgoingMessage>(MirageOutgoingPromptMessage(prompt = prompt, enhance_prompt = enhance))
+		webSocket?.sendMessage<LucyRestyleOutgoingMessage>(LucyRestyleOutgoingPromptMessage(prompt = prompt, enhance_prompt = enhance))
 	}
 
 	fun afterRenderWorld() {
@@ -436,7 +436,7 @@ object OasisClient : ClientModInitializer {
 	}
 
 	fun connectToWebSocketServer() {
-		webSocket = JsonWebSocket(URI.create(currentConfig!!.websocketUrl), Duration.ofMillis(currentConfig!!.websocketConnectTimeoutMs), object : JsonWebSocket.Listener<MirageIncomingMessage> {
+		webSocket = JsonWebSocket(URI.create(currentConfig!!.websocketUrl), Duration.ofMillis(currentConfig!!.websocketConnectTimeoutMs), object : JsonWebSocket.Listener<LucyRestyleIncomingMessage> {
 			override fun onOpen() {
 				setupPeerConnection()
 				sendOffer()
@@ -445,17 +445,17 @@ object OasisClient : ClientModInitializer {
 				onUnexpectedError(if (hasReceivedFrameBack) "Lost connection to the server, please try again later" else null)
 			}
 			override fun onError(error: Throwable) = onUnexpectedError()
-			override fun onMessage(message: MirageIncomingMessage) = handleMessage(message)
+			override fun onMessage(message: LucyRestyleIncomingMessage) = handleMessage(message)
 		})
 	}
 
-	fun handleMessage(message: MirageIncomingMessage) {
+	fun handleMessage(message: LucyRestyleIncomingMessage) {
 		when (message) {
-			is MirageIncomingIceCandidateMessage -> {
+			is LucyRestyleIncomingIceCandidateMessage -> {
 				Utils.log("Received ice-candidate message, adding candidate")
 				peerConnection?.addIceCandidate(RTCIceCandidate(message.candidate.sdpMid, message.candidate.sdpMLineIndex, message.candidate.candidate))
 			}
-			is MirageIncomingAnswerMessage -> {
+			is LucyRestyleIncomingAnswerMessage -> {
 				Utils.log("Received answer message, setting remote description")
 				peerConnection?.setRemoteDescription(RTCSessionDescription(RTCSdpType.ANSWER, message.sdp), object : SetSessionDescriptionObserver {
 					override fun onSuccess() {
@@ -467,13 +467,13 @@ object OasisClient : ClientModInitializer {
 					}
 				})
 			}
-			is MirageIncomingErrorMessage -> {
+			is LucyRestyleIncomingErrorMessage -> {
 				Utils.log("Received error message: ${message.error}")
 				onUnexpectedError(if (message.error == "401: Invalid API key") "Invalid API key" else null)
 			}
-			is MirageIncomingSessionIdMessage -> {}
-			is MirageIncomingPromptAckMessage -> {}
-			is MirageIncomingGenerationStartedMessage -> {}
+			is LucyRestyleIncomingSessionIdMessage -> {}
+			is LucyRestyleIncomingPromptAckMessage -> {}
+			is LucyRestyleIncomingGenerationStartedMessage -> {}
 		}
 	}
 
@@ -486,7 +486,7 @@ object OasisClient : ClientModInitializer {
 				peerConnection?.setLocalDescription(description, object : SetSessionDescriptionObserver {
 					override fun onSuccess() {
 						Utils.log("Set local description")
-						webSocket?.sendMessage<MirageOutgoingMessage>(MirageOutgoingOfferMessage(sdp = description.sdp))
+						webSocket?.sendMessage<LucyRestyleOutgoingMessage>(LucyRestyleOutgoingOfferMessage(sdp = description.sdp))
 					}
 					override fun onFailure(error: String) {
 						Utils.log("Failed to set local description: $error")
@@ -521,7 +521,7 @@ object OasisClient : ClientModInitializer {
 			}
 
 			override fun onIceCandidate(candidate: RTCIceCandidate) {
-				webSocket?.sendMessage<MirageOutgoingMessage>(MirageOutgoingIceCandidateMessage(candidate = IceCandidate(candidate = candidate.sdp, sdpMid = candidate.sdpMid, sdpMLineIndex = candidate.sdpMLineIndex)))
+				webSocket?.sendMessage<LucyRestyleOutgoingMessage>(LucyRestyleOutgoingIceCandidateMessage(candidate = IceCandidate(candidate = candidate.sdp, sdpMid = candidate.sdpMid, sdpMLineIndex = candidate.sdpMLineIndex)))
 			}
 
 			override fun onTrack(transceiver: RTCRtpTransceiver) {
