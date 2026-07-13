@@ -122,7 +122,7 @@ index 424504df43283b007c8406ca181bc8780c171c86..84a0b6b75ba90a5a44a6bf56a54aabe1
 \ No newline at end of file
 +endif()
 diff --git a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
-index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..4491e3850242ff56219c4c8653e664bb2b4784df 100644
+index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..82908cd1b8447254d71ab42d0b43e95e288e2cff 100644
 --- a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 +++ b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 @@ -79,10 +79,15 @@ function(execute_command)
@@ -282,6 +282,27 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..4491e3850242ff56219c4c8653e664bb
      if(${TARGET_CPU} STREQUAL "arm")
          set(COMPILE_ARGS "${COMPILE_ARGS} custom_toolchain=\"//build/toolchain/linux:clang_arm\"")
      elseif(${TARGET_CPU} STREQUAL "arm64")
+@@ -296,6 +361,20 @@ if(APPLE)
+     execute_command(
+         COMMAND ${CMAKE_AR} rc ${WEBRTC_SRC}/${WEBRTC_BUILD}/obj/libwebrtc.a ${SDK_OBJC_FILES}
+     )
++elseif(ANDROID)
++    # Build only the native WebRTC archive consumed by webrtc-java. Ninja's
++    # default target also pulls in Chromium's Android Java build pipeline
++    # (Turbine, SDK test helpers, APK tooling, and other unrelated artifacts),
++    # which is unnecessary for this JNI library and is not part of the lean
++    # source checkout used by the CI job.
++    execute_command(
++        COMMAND ninja -C "${WEBRTC_BUILD}" webrtc
++        WORKING_DIRECTORY "${WEBRTC_SRC}"
++    )
++
++    if(NOT EXISTS "${WEBRTC_LIB_PATH}")
++        message(FATAL_ERROR "Android WebRTC build completed without producing ${WEBRTC_LIB_PATH}")
++    endif()
+ else()
+     execute_command(
+         COMMAND ninja -C "${WEBRTC_BUILD}"
 diff --git a/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp b/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp
 index 165411e0303b05bfc19a08b869f8ffd3ff05098a..f5c23c96ce6c0ddeb8a0139bf853da3742e4e407 100644
 --- a/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp
