@@ -122,7 +122,7 @@ index 424504df43283b007c8406ca181bc8780c171c86..84a0b6b75ba90a5a44a6bf56a54aabe1
 \ No newline at end of file
 +endif()
 diff --git a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
-index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..4e636b65ba96fe6279013676c709be4c71313705 100644
+index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..4491e3850242ff56219c4c8653e664bb2b4784df 100644
 --- a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 +++ b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 @@ -79,10 +79,15 @@ function(execute_command)
@@ -152,7 +152,7 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..4e636b65ba96fe6279013676c709be4c
      target_include_directories(${PROJECT_NAME}
          PUBLIC
              ${TARGET_INC_DIR}/sdk/objc
-@@ -202,27 +209,59 @@ set(ENV{PATH} "${WEBRTC_SRC_DIR}/depot_tools${PATH_SEP}$ENV{PATH}")
+@@ -202,27 +209,79 @@ set(ENV{PATH} "${WEBRTC_SRC_DIR}/depot_tools${PATH_SEP}$ENV{PATH}")
  
  file(MAKE_DIRECTORY ${WEBRTC_DIR})
  
@@ -228,10 +228,30 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..4e636b65ba96fe6279013676c709be4c
 +else()
 +    message(STATUS "WebRTC: reuse cached, synchronized checkout")
 +endif()
++
++if(ANDROID)
++    # The Chromium checkout intentionally omits the large prebuilt Android
++    # SDK payload on this host. GitHub's runner already provides the complete
++    # SDK, so expose that whole layout at the path GN expects. Mapping the
++    # complete SDK also prevents follow-up failures for build-tools/platform-
++    # tools after fixing android.jar alone.
++    if(NOT DEFINED ENV{ANDROID_HOME} OR NOT EXISTS "$ENV{ANDROID_HOME}/platforms/android-36/android.jar")
++        message(FATAL_ERROR "GitHub runner Android SDK platform 36 is unavailable")
++    endif()
++    set(WEBRTC_ANDROID_SDK "${WEBRTC_SRC}/third_party/android_sdk/public")
++    file(REMOVE_RECURSE "${WEBRTC_ANDROID_SDK}")
++    execute_command(
++        COMMAND ${CMAKE_COMMAND} -E create_symlink "$ENV{ANDROID_HOME}" "${WEBRTC_ANDROID_SDK}"
++        WORKING_DIRECTORY "${WEBRTC_SRC}/third_party/android_sdk"
++    )
++    if(NOT EXISTS "${WEBRTC_ANDROID_SDK}/platforms/android-36/android.jar")
++        message(FATAL_ERROR "WebRTC Android SDK mapping failed")
++    endif()
++endif()
  
  if(LINUX)
      sysroot_install()
-@@ -252,6 +291,10 @@ if (PATCHES)
+@@ -252,6 +311,10 @@ if (PATCHES)
  endif()
  
  message(STATUS "WebRTC: generate")
@@ -242,7 +262,7 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..4e636b65ba96fe6279013676c709be4c
  set(COMPILE_ARGS "target_cpu=\"${TARGET_CPU}\" \
  use_custom_libcxx=${CUSTOM_LIBCXX} \
  is_clang=true \
-@@ -265,13 +308,15 @@ rtc_enable_protobuf=false \
+@@ -265,13 +328,15 @@ rtc_enable_protobuf=false \
  rtc_build_examples=false \
  rtc_include_tests=false \
  use_rtti=true \
