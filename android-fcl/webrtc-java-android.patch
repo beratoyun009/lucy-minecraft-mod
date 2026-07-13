@@ -97,8 +97,32 @@ index a761f4c0e66c724c325b3f1c89a3d9877485dd3a..d151ffb832a79abc1f3c4350a57d2352
      set_source_files_properties(${SOURCES} PROPERTIES COMPILE_FLAGS "-x objective-c++")
      target_link_options(${PROJECT_NAME} PRIVATE "-ObjC")
      target_link_libraries(${PROJECT_NAME} "-framework Foundation" "-framework AVFoundation" "-framework CoreMedia" "-framework CoreAudio" "-framework IOKit" "-framework CoreVideo" "-framework VideoToolbox" "-framework QuartzCore")
+diff --git a/webrtc-jni/src/main/cpp/dependencies/jni-voithos/CMakeLists.txt b/webrtc-jni/src/main/cpp/dependencies/jni-voithos/CMakeLists.txt
+index 424504df43283b007c8406ca181bc8780c171c86..84a0b6b75ba90a5a44a6bf56a54aabe154aa40d7 100644
+--- a/webrtc-jni/src/main/cpp/dependencies/jni-voithos/CMakeLists.txt
++++ b/webrtc-jni/src/main/cpp/dependencies/jni-voithos/CMakeLists.txt
+@@ -58,7 +58,11 @@ target_sources(${PROJECT_NAME}
+         src/JavaWrappedException.cpp
+ )
+ 
+-if(APPLE)
++if(ANDROID)
++    # Android's JNI ABI uses the same machine-dependent typedefs and calling
++    # convention macros as the bundled Linux JNI header.
++    set(JNI_PLATFORM "linux")
++elseif(APPLE)
+     set(JNI_PLATFORM "darwin")
+     set_source_files_properties(src/*.cpp PROPERTIES COMPILE_FLAGS "-x objective-c++")
+ elseif(LINUX)
+@@ -82,4 +86,4 @@ target_include_directories(${PROJECT_NAME}
+ 
+ if(LINUX)
+     target_link_libraries(${PROJECT_NAME} PRIVATE webrtc)
+-endif()
+\ No newline at end of file
++endif()
 diff --git a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
-index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..0801894754de8649461b4540936327368ae6c455 100644
+index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..3b2ba4a0c7739e8ce0f858301875fcbd75adaea9 100644
 --- a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 +++ b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 @@ -158,7 +158,9 @@ target_include_directories(${PROJECT_NAME}
@@ -112,7 +136,19 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..0801894754de8649461b454093632736
      target_include_directories(${PROJECT_NAME}
          PUBLIC
              ${TARGET_INC_DIR}/sdk/objc
-@@ -252,6 +254,10 @@ if (PATCHES)
+@@ -220,7 +222,10 @@ execute_command(
+ 
+ message(STATUS "WebRTC: sync")
+ execute_command(
+-    COMMAND gclient sync
++    # fetch first syncs the current WebRTC main branch. We then switch to the
++    # pinned release branch, so force gclient to replace stale third_party
++    # checkouts (notably cpu_features/ndk_compat) with that branch's DEPS.
++    COMMAND gclient sync -D --force --reset
+     WORKING_DIRECTORY "${WEBRTC_DIR}"
+ )
+ 
+@@ -252,6 +257,10 @@ if (PATCHES)
  endif()
  
  message(STATUS "WebRTC: generate")
@@ -123,7 +159,7 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..0801894754de8649461b454093632736
  set(COMPILE_ARGS "target_cpu=\"${TARGET_CPU}\" \
  use_custom_libcxx=${CUSTOM_LIBCXX} \
  is_clang=true \
-@@ -265,11 +271,13 @@ rtc_enable_protobuf=false \
+@@ -265,11 +274,13 @@ rtc_enable_protobuf=false \
  rtc_build_examples=false \
  rtc_include_tests=false \
  use_rtti=true \
