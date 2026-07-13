@@ -1,38 +1,234 @@
-name: build
+name: Oasis 2.0 1.1.6 Android FCL package
 
 on:
+  workflow_dispatch:
   push:
     branches:
-      - main
-  pull_request:
-    branches:
-      - main
+      - oasis-1.1.6-android-fcl
+    paths:
+      - ".github/workflows/android-fcl.yml"
+      - "android-fcl/webrtc-java-android.patch"
+      - "src/**"
+      - "build.gradle"
+      - "gradle.properties"
+
+concurrency:
+  group: oasis-1.1.6-android-fcl-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
-
+  build-mod:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
     steps:
-
-      - name: checkout repository
+      - name: Check out mod source
         uses: actions/checkout@v4
 
-      - name: validate gradle wrapper
-        uses: gradle/actions/wrapper-validation@v4
-
-      - name: setup jdk
+      - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
-          distribution: microsoft
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
 
-      - name: build
-        run: ./gradlew build
+      - name: Restore Maven cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: maven-webrtc-java-0.14.0-${{ runner.os }}
+          restore-keys: |
+            maven-webrtc-java-0.14.0-
 
-      - name: capture build artifacts
+      - name: Restore compact Android native JAR
+        id: native-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/android-native
+          key: webrtc-native-7204-android-arm64-fabric-v2-${{ hashFiles('android-fcl/webrtc-java-android.patch') }}
+
+      - name: Download verified Android native seed
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: lucy-android-fcl-native-webrtc
+          path: ${{ runner.temp }}/native-seed
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29232657492
+
+      - name: Prepare compact Android native JAR
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/android-native"
+          NATIVE_JAR="$(find "${RUNNER_TEMP}/native-seed" -name 'webrtc-java-0.14.0-linux-aarch64.jar' -print -quit)"
+          test -n "$NATIVE_JAR"
+          cp "$NATIVE_JAR" "${RUNNER_TEMP}/android-native/webrtc-java-0.14.0-linux-aarch64.jar"
+
+      - name: Add and verify Fabric metadata in Android native JAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NATIVE_JAR="${RUNNER_TEMP}/android-native/webrtc-java-0.14.0-linux-aarch64.jar"
+          test -f "$NATIVE_JAR"
+          python3 - <<'PY'
+          import json
+          import os
+          import tempfile
+          import zipfile
+
+          jar = os.environ["NATIVE_JAR"]
+          metadata = {
+              "schemaVersion": 1,
+              "id": "dev_onvoid_webrtc_webrtc-java_linux-aarch64",
+              "version": "0.14.0",
+              "name": "webrtc-java",
+              "custom": {"fabric-loom:generated": True},
+          }
+
+          fd, replacement = tempfile.mkstemp(
+              prefix="webrtc-java-linux-aarch64-",
+              suffix=".jar",
+              dir=os.path.dirname(jar),
+          )
+          os.close(fd)
+          try:
+              with zipfile.ZipFile(jar, "r") as source:
+                  comment = source.comment
+                  entries = [
+                      (entry, source.read(entry))
+                      for entry in source.infolist()
+                      if entry.filename != "fabric.mod.json"
+                  ]
+
+              with zipfile.ZipFile(replacement, "w") as target:
+                  target.comment = comment
+                  for entry, data in entries:
+                      target.writestr(entry, data)
+
+                  info = zipfile.ZipInfo("fabric.mod.json", (1980, 1, 1, 0, 0, 0))
+                  info.compress_type = zipfile.ZIP_DEFLATED
+                  target.writestr(
+                      info,
+                      json.dumps(metadata, indent=2, separators=(",", ": ")) + "\n",
+                  )
+
+              os.replace(replacement, jar)
+          finally:
+              if os.path.exists(replacement):
+                  os.remove(replacement)
+
+          with zipfile.ZipFile(jar, "r") as verified:
+              names = verified.namelist()
+              assert names.count("fabric.mod.json") == 1, names
+              assert json.loads(verified.read("fabric.mod.json")) == metadata
+              assert "libwebrtc-java-linux-aarch64.so" in names
+          PY
+          unzip -p "$NATIVE_JAR" fabric.mod.json | tee android-native-fabric.mod.json
+          grep -q '"id": "dev_onvoid_webrtc_webrtc-java_linux-aarch64"' android-native-fabric.mod.json
+
+      - name: Save compact Android native JAR
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/android-native
+          key: webrtc-native-7204-android-arm64-fabric-v2-${{ hashFiles('android-fcl/webrtc-java-android.patch') }}
+
+      - name: Verify and install Android native classifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          NATIVE_JAR="${RUNNER_TEMP}/android-native/webrtc-java-0.14.0-linux-aarch64.jar"
+          test -f "$NATIVE_JAR"
+          NATIVE_SO="${RUNNER_TEMP}/libwebrtc-java-linux-aarch64.so"
+          unzip -p "$NATIVE_JAR" libwebrtc-java-linux-aarch64.so > "$NATIVE_SO"
+          readelf -h "$NATIVE_SO"
+          readelf -d "$NATIVE_SO" | tee android-native-dependencies.txt
+          if grep -Eq 'libstdc\+\+|libc\.so\.6|ld-linux|libpulse|libX11|libudev|libdbus' android-native-dependencies.txt; then
+            echo "Desktop GNU/Linux dependency detected in Android binary"
+            exit 1
+          fi
+          grep -q 'libandroid.so' android-native-dependencies.txt
+
+          mvn -B org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
+            -Dfile="$NATIVE_JAR" \
+            -DgroupId=dev.onvoid.webrtc \
+            -DartifactId=webrtc-java \
+            -Dversion=0.14.0 \
+            -Dpackaging=jar \
+            -Dclassifier=linux-aarch64 \
+            -DgeneratePom=false
+
+      - name: Build Fabric mod with Android WebRTC
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          rm -rf "$HOME/.gradle/caches/modules-2/files-2.1/dev.onvoid.webrtc/webrtc-java/0.14.0"
+          ./gradlew build --stacktrace
+
+      - name: Replace packaged classifier with verified Android JAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR="$(realpath "$(find build/libs -maxdepth 1 -name '*.jar' ! -name '*-sources.jar' -print -quit)")"
+          test -f "$JAR"
+          UPDATE_DIR="${RUNNER_TEMP}/native-jar-update"
+          mkdir -p "$UPDATE_DIR/META-INF/jars"
+          cp "${RUNNER_TEMP}/android-native/webrtc-java-0.14.0-linux-aarch64.jar" \
+            "$UPDATE_DIR/META-INF/jars/webrtc-java-0.14.0-linux-aarch64.jar"
+          cd "$UPDATE_DIR"
+          zip -q -u "$JAR" META-INF/jars/webrtc-java-0.14.0-linux-aarch64.jar
+
+      - name: Verify packaged Android WebRTC
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR="$(find build/libs -maxdepth 1 -name '*.jar' ! -name '*-sources.jar' -print -quit)"
+          test -n "$JAR"
+          unzip -l "$JAR" | tee packaged-files.txt
+          grep -q 'webrtc-java-0.14.0-linux-aarch64.jar' packaged-files.txt
+
+          BUILT_NATIVE_JAR="${RUNNER_TEMP}/android-native/webrtc-java-0.14.0-linux-aarch64.jar"
+          PACKAGED_NATIVE_JAR="${RUNNER_TEMP}/packaged-webrtc-java-linux-aarch64.jar"
+          unzip -p "$JAR" META-INF/jars/webrtc-java-0.14.0-linux-aarch64.jar > "$PACKAGED_NATIVE_JAR"
+          cmp "$BUILT_NATIVE_JAR" "$PACKAGED_NATIVE_JAR"
+
+          unzip -p "$PACKAGED_NATIVE_JAR" fabric.mod.json > packaged-native-fabric.mod.json
+          python3 - <<'PY'
+          import json
+          with open("packaged-native-fabric.mod.json", encoding="utf-8") as source:
+              metadata = json.load(source)
+          assert metadata == {
+              "schemaVersion": 1,
+              "id": "dev_onvoid_webrtc_webrtc-java_linux-aarch64",
+              "version": "0.14.0",
+              "name": "webrtc-java",
+              "custom": {"fabric-loom:generated": True},
+          }
+          PY
+
+          PACKAGED_SO="${RUNNER_TEMP}/packaged-libwebrtc-java-linux-aarch64.so"
+          unzip -p "$PACKAGED_NATIVE_JAR" libwebrtc-java-linux-aarch64.so > "$PACKAGED_SO"
+          readelf -d "$PACKAGED_SO" | tee packaged-android-native-dependencies.txt
+          if grep -Eq 'libstdc\+\+|libc\.so\.6|ld-linux|libpulse|libX11|libudev|libdbus' packaged-android-native-dependencies.txt; then
+            echo "Final mod accidentally contains a desktop GNU/Linux native library"
+            exit 1
+          fi
+          grep -q 'libandroid.so' packaged-android-native-dependencies.txt
+
+      - name: Upload Android FCL mod JARs
         uses: actions/upload-artifact@v4
         with:
-          name: mod.jar
-          path: ./build/libs/*.jar
+          name: oasis-1.1.6-android-fcl
+          path: |
+            build/libs/*.jar
+            android-native-dependencies.txt
+            android-native-fabric.mod.json
+            packaged-android-native-dependencies.txt
+            packaged-native-fabric.mod.json
           if-no-files-found: error
-          compression-level: 0
