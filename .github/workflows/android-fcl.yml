@@ -118,6 +118,19 @@ jobs:
           rm -rf "$HOME/.gradle/caches/modules-2/files-2.1/dev.onvoid.webrtc/webrtc-java/0.14.0"
           ./gradlew build --stacktrace
 
+      - name: Replace packaged classifier with verified Android JAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR="$(realpath "$(find build/libs -maxdepth 1 -name '*.jar' ! -name '*-sources.jar' -print -quit)")"
+          test -f "$JAR"
+          UPDATE_DIR="${RUNNER_TEMP}/native-jar-update"
+          mkdir -p "$UPDATE_DIR/META-INF/jars"
+          cp "${RUNNER_TEMP}/android-native/webrtc-java-0.14.0-linux-aarch64.jar" \
+            "$UPDATE_DIR/META-INF/jars/webrtc-java-0.14.0-linux-aarch64.jar"
+          cd "$UPDATE_DIR"
+          zip -q -u "$JAR" META-INF/jars/webrtc-java-0.14.0-linux-aarch64.jar
+
       - name: Verify packaged Android WebRTC
         shell: bash
         run: |
