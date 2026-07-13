@@ -1,4 +1,4 @@
-name: Android FCL native WebRTC build
+name: Android FCL native WebRTC package
 
 on:
   workflow_dispatch:
@@ -13,13 +13,26 @@ on:
       - "gradle.properties"
 
 permissions:
+  actions: write
   contents: read
 
 jobs:
   build-mod:
     runs-on: ubuntu-22.04
-    timeout-minutes: 360
+    timeout-minutes: 45
     steps:
+      - name: Cancel superseded full-fetch run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/29234675831/cancel" || true
+
       - name: Check out mod source
         uses: actions/checkout@v4
 
@@ -30,22 +43,6 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      - name: Free runner disk space
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
-
-      - name: Install native build tools
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y cmake curl git maven ninja-build python3 unzip
-          test -d "${ANDROID_NDK_LATEST_HOME}"
-          echo "ANDROID_NDK_HOME=${ANDROID_NDK_LATEST_HOME}" >> "${GITHUB_ENV}"
-
       - name: Restore Maven cache
         uses: actions/cache@v4
         with:
@@ -54,56 +51,56 @@ jobs:
           restore-keys: |
             maven-webrtc-java-0.14.0-
 
-      - name: Restore compact compiled WebRTC bundle
-        id: webrtc-install-cache
+      - name: Restore compact Android native JAR
+        id: native-cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ runner.temp }}/webrtc-install
-          key: webrtc-install-7204-android-arm64-v1
+          path: ${{ runner.temp }}/android-native
+          key: webrtc-native-7204-android-arm64-${{ hashFiles('android-fcl/webrtc-java-android.patch') }}
 
-      - name: Restore synchronized WebRTC checkout
-        if: steps.webrtc-install-cache.outputs.cache-hit != 'true'
-        id: webrtc-cache
-        uses: actions/cache/restore@v4
+      - name: Download verified Android native seed
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v4
         with:
-          path: ${{ runner.temp }}/webrtc-checkout
-          key: webrtc-src-7204-android-arm64-v6
-          restore-keys: |
-            webrtc-src-7204-android-arm64-v5
-            webrtc-src-7204-android-arm64-v4
-            webrtc-src-7204-android-arm64-v3
-            webrtc-src-7204-android-arm64-v2
+          name: lucy-android-fcl-native-webrtc
+          path: ${{ runner.temp }}/native-seed
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29232657492
 
-      - name: Check out webrtc-java 0.14.0
+      - name: Prepare compact Android native JAR
+        if: steps.native-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
-          git clone https://github.com/devopvoid/webrtc-java.git "${RUNNER_TEMP}/webrtc-java"
-          cd "${RUNNER_TEMP}/webrtc-java"
-          git checkout d6642ec41c77e3d9ff5feb963aeafb196743716e
-          git apply "${GITHUB_WORKSPACE}/android-fcl/webrtc-java-android.patch"
-          git diff --check
-          git status --short
-
-      - name: Build Android ARM64 WebRTC JNI
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "${RUNNER_TEMP}/webrtc-java"
-          mvn -B -pl webrtc-jni -am package \
-            -DskipTests \
-            -Pandroid-aarch64 \
-            -Dplatform.classifier=linux-aarch64 \
-            -Dplatform.module=webrtc.linux.aarch64 \
-            -Dcmake.toolchain.file=toolchain/aarch64-android-clang.cmake \
-            -Dwebrtc.src.dir="${RUNNER_TEMP}/webrtc-checkout" \
-            -Dwebrtc.install.dir="${RUNNER_TEMP}/webrtc-install"
-
-          # The classifier intentionally keeps the Linux name because FCL's
-          # JVM reports os.name=Linux, but replace Maven Central's desktop
-          # artifact with the Bionic/Android binary built immediately above.
-          NATIVE_JAR="$(find webrtc-jni/target -maxdepth 1 -name 'webrtc-java-0.14.0-linux-aarch64.jar' -print -quit)"
+          mkdir -p "${RUNNER_TEMP}/android-native"
+          NATIVE_JAR="$(find "${RUNNER_TEMP}/native-seed" -name 'webrtc-java-0.14.0-linux-aarch64.jar' -print -quit)"
           test -n "$NATIVE_JAR"
+          cp "$NATIVE_JAR" "${RUNNER_TEMP}/android-native/webrtc-java-0.14.0-linux-aarch64.jar"
+
+      - name: Save compact Android native JAR
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/android-native
+          key: webrtc-native-7204-android-arm64-${{ hashFiles('android-fcl/webrtc-java-android.patch') }}
+
+      - name: Verify and install Android native classifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          NATIVE_JAR="${RUNNER_TEMP}/android-native/webrtc-java-0.14.0-linux-aarch64.jar"
+          test -f "$NATIVE_JAR"
+          NATIVE_SO="${RUNNER_TEMP}/libwebrtc-java-linux-aarch64.so"
+          unzip -p "$NATIVE_JAR" libwebrtc-java-linux-aarch64.so > "$NATIVE_SO"
+          readelf -h "$NATIVE_SO"
+          readelf -d "$NATIVE_SO" | tee android-native-dependencies.txt
+          if grep -Eq 'libstdc\+\+|libc\.so\.6|ld-linux|libpulse|libX11|libudev|libdbus' android-native-dependencies.txt; then
+            echo "Desktop GNU/Linux dependency detected in Android binary"
+            exit 1
+          fi
+          grep -q 'libandroid.so' android-native-dependencies.txt
+
           mvn -B org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
             -Dfile="$NATIVE_JAR" \
             -DgroupId=dev.onvoid.webrtc \
@@ -113,48 +110,11 @@ jobs:
             -Dclassifier=linux-aarch64 \
             -DgeneratePom=false
 
-      - name: Save compact compiled WebRTC bundle
-        if: success() && steps.webrtc-install-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/webrtc-install
-          key: webrtc-install-7204-android-arm64-v1
-
-      - name: Save synchronized WebRTC checkout
-        if: always() && steps.webrtc-install-cache.outputs.cache-hit != 'true' && steps.webrtc-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/webrtc-checkout
-          key: webrtc-src-7204-android-arm64-v6
-
-      - name: Report WebRTC checkout size
-        if: always()
-        shell: bash
-        run: du -sh "${RUNNER_TEMP}/webrtc-checkout" || true
-
-      - name: Verify Android native dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          SO="$(find "${RUNNER_TEMP}/webrtc-java/webrtc-jni/target/lib" -name 'libwebrtc-java-linux-aarch64.so' -print -quit)"
-          test -n "$SO"
-          READELF="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
-          "$READELF" -h "$SO"
-          "$READELF" -d "$SO" | tee "${GITHUB_WORKSPACE}/android-native-dependencies.txt"
-          if grep -Eq 'libstdc\+\+|libc\.so\.6|ld-linux|libpulse|libX11|libudev|libdbus' "${GITHUB_WORKSPACE}/android-native-dependencies.txt"; then
-            echo "Desktop GNU/Linux dependency detected in Android binary"
-            exit 1
-          fi
-
       - name: Build Fabric mod with Android WebRTC
         shell: bash
         run: |
           set -euo pipefail
           chmod +x gradlew
-          # setup-java may restore Gradle's cached desktop classifier. Remove
-          # only this dependency so mavenLocal's freshly installed Android
-          # classifier wins without discarding the rest of the Gradle cache.
           rm -rf "$HOME/.gradle/caches/modules-2/files-2.1/dev.onvoid.webrtc/webrtc-java/0.14.0"
           ./gradlew build --stacktrace
 
@@ -167,26 +127,26 @@ jobs:
           unzip -l "$JAR" | tee packaged-files.txt
           grep -q 'webrtc-java-0.14.0-linux-aarch64.jar' packaged-files.txt
 
-          BUILT_NATIVE_JAR="$(find "${RUNNER_TEMP}/webrtc-java/webrtc-jni/target" -maxdepth 1 -name 'webrtc-java-0.14.0-linux-aarch64.jar' -print -quit)"
+          BUILT_NATIVE_JAR="${RUNNER_TEMP}/android-native/webrtc-java-0.14.0-linux-aarch64.jar"
           PACKAGED_NATIVE_JAR="${RUNNER_TEMP}/packaged-webrtc-java-linux-aarch64.jar"
           unzip -p "$JAR" META-INF/jars/webrtc-java-0.14.0-linux-aarch64.jar > "$PACKAGED_NATIVE_JAR"
           cmp "$BUILT_NATIVE_JAR" "$PACKAGED_NATIVE_JAR"
 
           PACKAGED_SO="${RUNNER_TEMP}/packaged-libwebrtc-java-linux-aarch64.so"
           unzip -p "$PACKAGED_NATIVE_JAR" libwebrtc-java-linux-aarch64.so > "$PACKAGED_SO"
-          READELF="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
-          "$READELF" -d "$PACKAGED_SO" | tee packaged-android-native-dependencies.txt
+          readelf -d "$PACKAGED_SO" | tee packaged-android-native-dependencies.txt
           if grep -Eq 'libstdc\+\+|libc\.so\.6|ld-linux|libpulse|libX11|libudev|libdbus' packaged-android-native-dependencies.txt; then
             echo "Final mod accidentally contains a desktop GNU/Linux native library"
             exit 1
           fi
+          grep -q 'libandroid.so' packaged-android-native-dependencies.txt
 
-      - name: Upload native port and mod JARs
+      - name: Upload Android FCL mod JARs
         uses: actions/upload-artifact@v4
         with:
-          name: lucy-android-fcl-native-webrtc
+          name: lucy-android-fcl
           path: |
             build/libs/*.jar
-            ${{ runner.temp }}/webrtc-java/webrtc-jni/target/webrtc-java-0.14.0-linux-aarch64.jar
             android-native-dependencies.txt
+            packaged-android-native-dependencies.txt
           if-no-files-found: error
