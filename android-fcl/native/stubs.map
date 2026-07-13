@@ -1,0 +1,16 @@
+FCL_STUB_1.0 {
+  global: X*;
+  local: *;
+};
+
+PULSE_0 {
+  global: pa_*;
+} FCL_STUB_1.0;
+
+LIBUDEV_183 {
+  global: udev_*;
+} FCL_STUB_1.0;
+
+LIBDBUS_1_3 {
+  global: dbus_*;
+} FCL_STUB_1.0;
