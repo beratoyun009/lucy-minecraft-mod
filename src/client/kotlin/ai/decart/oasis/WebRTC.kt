@@ -23,7 +23,10 @@ import dev.onvoid.webrtc.RTCSignalingState
 import ai.decart.oasis.Utils
 
 object WebRTC {
-	val peerConnectionFactory = run {\n\t\tAndroidNativeBootstrap.prepare()\n\t\tPeerConnectionFactory()\n\t}
+	val peerConnectionFactory = run {
+		AndroidNativeBootstrap.prepare()
+		PeerConnectionFactory()
+	}
 
 	fun enableLogging() {
 		Logging.logToDebug(Logging.Severity.INFO)
