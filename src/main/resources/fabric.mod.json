@@ -4,9 +4,7 @@
 	"version": "${mod_version}",
 	"name": "Lucy Restyle Minecraft Mod",
 	"description": "A real-time AI mod powered by Lucy Restyle that transforms your world as you play.",
-	"authors": [
-		"Decart"
-	],
+	"authors": ["Decart"],
 	"contact": {
 		"sources": "https://github.com/DecartAI/lucy-minecraft-mod"
 	},
@@ -14,24 +12,20 @@
 	"icon": "icon.png",
 	"environment": "client",
 	"entrypoints": {
-		"client": [
-			{
-				"value": "${mod_package}.OasisClient",
-				"adapter": "kotlin"
-			}
-		]
+		"client": [{
+			"value": "${mod_package}.OasisClient",
+			"adapter": "kotlin"
+		}]
 	},
-	"mixins": [
-		{
-			"config": "${mod_id}.client.mixins.json",
-			"environment": "client"
-		}
-	],
+	"mixins": [{
+		"config": "${mod_id}.client.mixins.json",
+		"environment": "client"
+	}],
 	"depends": {
 		"java": ">=21",
 		"minecraft": "~${minecraft_version}",
-		"fabricloader": "~${fabric_loader_version}",
-		"fabric-api": "~${fabric_api_version}",
-		"fabric-language-kotlin": "~${fabric_kotlin_version}"
+		"fabricloader": ">=0.17.2",
+		"fabric-api": "*",
+		"fabric-language-kotlin": ">=1.13.6"
 	}
 }
