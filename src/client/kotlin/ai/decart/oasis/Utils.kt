@@ -21,7 +21,7 @@ import net.fabricmc.loader.api.FabricLoader
 
 object Utils {
 	const val MOD_PROD_BUILD = true
-	const val DEBUG = false
+	const val DEBUG = true
 	val modMetadata = FabricLoader.getInstance().getModContainer("lucy-restyle-minecraft-mod").orElse(null)!!.metadata
 
 	fun log(message: String) {
