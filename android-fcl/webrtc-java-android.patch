@@ -1,0 +1,448 @@
+diff --git a/pom.xml b/pom.xml
+index e33daced4b20621ef7bb30391669f6109bb206db..15cdb9e98eec9bbc1a541046900f4782b62de9fc 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -248,6 +248,16 @@
+ 	</build>
+ 
+ 	<profiles>
++		<!-- Android/FCL deliberately publishes under the linux-aarch64 classifier.
++		     FCL's HotSpot VM reports os.name=Linux, so NativeLoader looks for that
++		     classifier even though the binary itself must target Android/Bionic. -->
++		<profile>
++			<id>android-aarch64</id>
++			<properties>
++				<platform.classifier>linux-aarch64</platform.classifier>
++				<platform.module>webrtc.linux.aarch64</platform.module>
++			</properties>
++		</profile>
+ 		<profile>
+ 			<id>release</id>
+ 			<build>
+@@ -374,4 +384,4 @@
+ 			<scope>test</scope>
+ 		</dependency>
+ 	</dependencies>
+-</project>
+\ No newline at end of file
++</project>
+diff --git a/webrtc-jni/pom.xml b/webrtc-jni/pom.xml
+index 8d7f9afcc9fcaa48a4d7df495562a9fd6d97244f..53fc9dbb3877b3327afc2934be6c1255fcaf658a 100644
+--- a/webrtc-jni/pom.xml
++++ b/webrtc-jni/pom.xml
+@@ -136,6 +136,12 @@
+ 	</build>
+ 
+ 	<profiles>
++		<profile>
++			<id>android-aarch64</id>
++			<properties>
++				<cmake.toolchain.file>toolchain/aarch64-android-clang.cmake</cmake.toolchain.file>
++			</properties>
++		</profile>
+ 		<profile>
+ 			<id>windows-x86_64</id>
+ 			<activation>
+diff --git a/webrtc-jni/src/main/cpp/CMakeLists.txt b/webrtc-jni/src/main/cpp/CMakeLists.txt
+index a761f4c0e66c724c325b3f1c89a3d9877485dd3a..ae607a90af9f204a8cb27894e5560e170a5e863a 100644
+--- a/webrtc-jni/src/main/cpp/CMakeLists.txt
++++ b/webrtc-jni/src/main/cpp/CMakeLists.txt
+@@ -7,7 +7,9 @@ endif()
+ 
+ project(webrtc-java)
+ 
+-if(UNIX AND NOT APPLE)
++if(ANDROID)
++    set(SOURCE_TARGET android)
++elseif(UNIX AND NOT APPLE)
+     # Apply the sysroot configuration for the actual build
+     if(DEFERRED_SYSROOT)
+         # Configure sysroot for all subsequent operations
+@@ -27,7 +29,10 @@ if(UNIX AND NOT APPLE)
+     set(LINUX TRUE)
+ endif()
+ 
+-if(APPLE)
++if(ANDROID)
++    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
++    set(SOURCE_TARGET android)
++elseif(APPLE)
+     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -s")
+     set(SOURCE_TARGET macos)
+@@ -76,6 +81,17 @@ list(APPEND SOURCES
+     ${SOURCES_RTC}
+ )
+ 
++if(ANDROID)
++    # Oasis supplies its own frames and uses HeadlessAudioDeviceModule. Avoid
++    # desktop-only capture/device entry points which require X11, V4L2, udev,
++    # PulseAudio or DBus and are never called by the mod.
++    list(FILTER SOURCES EXCLUDE REGEX "JNI_(AudioDeviceModule|DesktopCapturer|MediaDevices|PowerManagement|ScreenCapturer|VideoCapture|VideoDesktopSource|VideoDeviceSource|WindowCapturer)\\.cpp$")
++    # Keep VideoDevice.cpp: it contains platform-neutral Java conversion
++    # helpers used by DeviceChangeListener even when physical capture is off.
++    list(FILTER SOURCES EXCLUDE REGEX "src/media/video/(VideoCapture|VideoTrackDesktopSource|VideoTrackDeviceSource)")
++    list(FILTER SOURCES EXCLUDE REGEX "src/media/video/desktop/")
++endif()
++
+ add_library(${PROJECT_NAME} SHARED ${SOURCES})
+ 
+ # Introduced since WebRTC branch 7204 and Clang 20.
+@@ -99,7 +115,9 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
+ target_link_libraries(${PROJECT_NAME} jni-voithos)
+ target_link_libraries(${PROJECT_NAME} webrtc)
+ 
+-if(APPLE)
++if(ANDROID)
++    target_link_libraries(${PROJECT_NAME} android log dl)
++elseif(APPLE)
+     set_source_files_properties(${SOURCES} PROPERTIES COMPILE_FLAGS "-x objective-c++")
+     target_link_options(${PROJECT_NAME} PRIVATE "-ObjC")
+     target_link_libraries(${PROJECT_NAME} "-framework Foundation" "-framework AVFoundation" "-framework CoreMedia" "-framework CoreAudio" "-framework IOKit" "-framework CoreVideo" "-framework VideoToolbox" "-framework QuartzCore")
+diff --git a/webrtc-jni/src/main/cpp/dependencies/jni-voithos/CMakeLists.txt b/webrtc-jni/src/main/cpp/dependencies/jni-voithos/CMakeLists.txt
+index 424504df43283b007c8406ca181bc8780c171c86..84a0b6b75ba90a5a44a6bf56a54aabe154aa40d7 100644
+--- a/webrtc-jni/src/main/cpp/dependencies/jni-voithos/CMakeLists.txt
++++ b/webrtc-jni/src/main/cpp/dependencies/jni-voithos/CMakeLists.txt
+@@ -58,7 +58,11 @@ target_sources(${PROJECT_NAME}
+         src/JavaWrappedException.cpp
+ )
+ 
+-if(APPLE)
++if(ANDROID)
++    # Android's JNI ABI uses the same machine-dependent typedefs and calling
++    # convention macros as the bundled Linux JNI header.
++    set(JNI_PLATFORM "linux")
++elseif(APPLE)
+     set(JNI_PLATFORM "darwin")
+     set_source_files_properties(src/*.cpp PROPERTIES COMPILE_FLAGS "-x objective-c++")
+ elseif(LINUX)
+@@ -82,4 +86,4 @@ target_include_directories(${PROJECT_NAME}
+ 
+ if(LINUX)
+     target_link_libraries(${PROJECT_NAME} PRIVATE webrtc)
+-endif()
+\ No newline at end of file
++endif()
+diff --git a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
+index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..d75ee95de6cbc6d8150acee71edd140bd46daa38 100644
+--- a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
++++ b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
+@@ -79,10 +79,15 @@ function(execute_command)
+         WORKING_DIRECTORY "${CMD_ARGS_WORKING_DIRECTORY}"
+         OUTPUT_VARIABLE COMMAND_OUTPUT
+         ERROR_VARIABLE COMMAND_ERROR
++        RESULT_VARIABLE COMMAND_RESULT
+     )
+ 
+     print("${COMMAND_OUTPUT}")
+     print("${COMMAND_ERROR}")
++
++    if(NOT COMMAND_RESULT EQUAL 0)
++        message(FATAL_ERROR "Command failed (${COMMAND_RESULT}): ${CMD_ARGS_COMMAND}")
++    endif()
+ endfunction()
+ 
+ function(sysroot_install)
+@@ -158,7 +163,9 @@ target_include_directories(${PROJECT_NAME}
+ )
+ target_link_libraries(${PROJECT_NAME} ${TARGET_LINK_LIB})
+ 
+-if(APPLE)
++if(ANDROID)
++    target_compile_definitions(${PROJECT_NAME} PUBLIC WEBRTC_ANDROID WEBRTC_POSIX)
++elseif(APPLE)
+     target_include_directories(${PROJECT_NAME}
+         PUBLIC
+             ${TARGET_INC_DIR}/sdk/objc
+@@ -202,27 +209,113 @@ set(ENV{PATH} "${WEBRTC_SRC_DIR}/depot_tools${PATH_SEP}$ENV{PATH}")
+ 
+ file(MAKE_DIRECTORY ${WEBRTC_DIR})
+ 
+-message(STATUS "WebRTC: fetch")
+-execute_command(
+-    COMMAND fetch --nohooks webrtc
+-    WORKING_DIRECTORY "${WEBRTC_DIR}"
+-)
++set(WEBRTC_SYNC_STAMP "${WEBRTC_DIR}/.android-branch-7204-synced-v2")
++if(NOT EXISTS "${WEBRTC_SYNC_STAMP}")
++    if(NOT EXISTS "${WEBRTC_SRC}/.git")
++        message(STATUS "WebRTC: fetch")
++        execute_command(
++            COMMAND fetch --nohooks webrtc
++            WORKING_DIRECTORY "${WEBRTC_DIR}"
++        )
++    endif()
+ 
+-message(STATUS "WebRTC: checkout \"${WEBRTC_BRANCH}\"")
+-execute_command(
+-    COMMAND git checkout .
+-    WORKING_DIRECTORY "${WEBRTC_SRC}"
+-)
+-execute_command(
+-    COMMAND git checkout ${WEBRTC_BRANCH}
+-    WORKING_DIRECTORY "${WEBRTC_SRC}"
+-)
++    message(STATUS "WebRTC: checkout \"${WEBRTC_BRANCH}\"")
++    execute_command(
++        COMMAND git checkout .
++        WORKING_DIRECTORY "${WEBRTC_SRC}"
++    )
++    execute_command(
++        COMMAND git checkout ${WEBRTC_BRANCH}
++        WORKING_DIRECTORY "${WEBRTC_SRC}"
++    )
+ 
+-message(STATUS "WebRTC: sync")
+-execute_command(
+-    COMMAND gclient sync
+-    WORKING_DIRECTORY "${WEBRTC_DIR}"
+-)
++    if(ANDROID)
++        # fetch creates a desktop-oriented .gclient file by default. Declaring
++        # Android here makes gclient evaluate every checkout_android entry in
++        # the pinned DEPS file, including native sources and pinned CIPD Java
++        # tools used to generate Android JNI headers.
++        set(GCLIENT_FILE "${WEBRTC_DIR}/.gclient")
++        file(READ "${GCLIENT_FILE}" GCLIENT_CONFIG)
++        if(GCLIENT_CONFIG MATCHES "target_os[ \t]*=")
++            string(REGEX REPLACE "target_os[ \t]*=[^\r\n]*" "target_os = ['android']" GCLIENT_CONFIG "${GCLIENT_CONFIG}")
++        else()
++            string(APPEND GCLIENT_CONFIG "\ntarget_os = ['android']\n")
++        endif()
++        file(WRITE "${GCLIENT_FILE}" "${GCLIENT_CONFIG}")
++    endif()
++
++    message(STATUS "WebRTC: sync")
++    execute_command(
++        # fetch first syncs the current WebRTC main branch. We then switch to
++        # the pinned release branch, so replace stale third_party checkouts.
++        COMMAND gclient sync -D --force --reset
++        WORKING_DIRECTORY "${WEBRTC_DIR}"
++    )
++
++    # branch-heads/7204 references the NDK compatibility target, but gclient
++    # can leave cpu_features at a revision without ndk_compat after switching
++    # from current main. Repair it deterministically before generating Ninja.
++    set(CPU_FEATURES_DIR "${WEBRTC_SRC}/third_party/cpu_features/src")
++    set(CPU_FEATURES_COMPAT "${CPU_FEATURES_DIR}/ndk_compat/cpu-features.c")
++    if(ANDROID AND NOT EXISTS "${CPU_FEATURES_COMPAT}")
++        message(STATUS "WebRTC: repair Android cpu_features checkout")
++        file(REMOVE_RECURSE "${CPU_FEATURES_DIR}")
++        execute_command(
++            COMMAND git clone https://chromium.googlesource.com/external/github.com/google/cpu_features "${CPU_FEATURES_DIR}"
++            WORKING_DIRECTORY "${WEBRTC_SRC}/third_party/cpu_features"
++        )
++        execute_command(
++            COMMAND git checkout ec7d390a9046ff11cf0f61df37493bbc140fbd38
++            WORKING_DIRECTORY "${CPU_FEATURES_DIR}"
++        )
++    endif()
++    if(ANDROID AND NOT EXISTS "${CPU_FEATURES_COMPAT}")
++        message(FATAL_ERROR "Android cpu_features compatibility source is still missing")
++    endif()
++
++    file(WRITE "${WEBRTC_SYNC_STAMP}" "${WEBRTC_BRANCH}\n")
++else()
++    message(STATUS "WebRTC: reuse cached, synchronized checkout")
++endif()
++
++if(ANDROID)
++    # Turbine generates a small Android Java source archive required by one
++    # of WebRTC's native JNI-header targets. Keep a deterministic fallback in
++    # case a restored checkout predates the Android-aware gclient sync.
++    set(TURBINE_ROOT "${WEBRTC_SRC}/third_party/turbine/cipd")
++    set(TURBINE_JAR "${TURBINE_ROOT}/turbine.jar")
++    if(NOT EXISTS "${TURBINE_JAR}")
++        message(STATUS "WebRTC: install pinned Turbine package")
++        file(MAKE_DIRECTORY "${TURBINE_ROOT}")
++        set(TURBINE_ENSURE_FILE "${WEBRTC_DIR}/.turbine.ensure")
++        file(WRITE "${TURBINE_ENSURE_FILE}" "chromium/third_party/turbine VGtOG2ivl1SJR7Lai5FQddIu15mWCYDnp47QtozMQeoC\n")
++        execute_command(
++            COMMAND cipd ensure -root "${TURBINE_ROOT}" -ensure-file "${TURBINE_ENSURE_FILE}"
++            WORKING_DIRECTORY "${WEBRTC_DIR}"
++        )
++    endif()
++    if(NOT EXISTS "${TURBINE_JAR}")
++        message(FATAL_ERROR "Pinned Android Turbine package did not provide ${TURBINE_JAR}")
++    endif()
++
++    # The Chromium checkout intentionally omits the large prebuilt Android
++    # SDK payload on this host. GitHub's runner already provides the complete
++    # SDK, so expose that whole layout at the path GN expects. Mapping the
++    # complete SDK also prevents follow-up failures for build-tools/platform-
++    # tools after fixing android.jar alone.
++    if(NOT DEFINED ENV{ANDROID_HOME} OR NOT EXISTS "$ENV{ANDROID_HOME}/platforms/android-36/android.jar")
++        message(FATAL_ERROR "GitHub runner Android SDK platform 36 is unavailable")
++    endif()
++    set(WEBRTC_ANDROID_SDK "${WEBRTC_SRC}/third_party/android_sdk/public")
++    file(REMOVE_RECURSE "${WEBRTC_ANDROID_SDK}")
++    execute_command(
++        COMMAND ${CMAKE_COMMAND} -E create_symlink "$ENV{ANDROID_HOME}" "${WEBRTC_ANDROID_SDK}"
++        WORKING_DIRECTORY "${WEBRTC_SRC}/third_party/android_sdk"
++    )
++    if(NOT EXISTS "${WEBRTC_ANDROID_SDK}/platforms/android-36/android.jar")
++        message(FATAL_ERROR "WebRTC Android SDK mapping failed")
++    endif()
++endif()
+ 
+ if(LINUX)
+     sysroot_install()
+@@ -251,7 +344,45 @@ if (PATCHES)
+     endforeach(PATCH)
+ endif()
+ 
++if(ANDROID)
++    # webrtc-java uses WebRTC's generic C++ API directly. The root Android
++    # target otherwise also pulls in the separately packaged Java SDK and its
++    # libjingle_peerconnection_so.so, neither of which this JNI library loads.
++    # Edit the exact dependency entry idempotently so restored checkouts do not
++    # depend on git-patch context or whether a prior cache already contains it.
++    file(READ "${WEBRTC_SRC}/BUILD.gn" WEBRTC_ROOT_BUILD_GN)
++    string(FIND "${WEBRTC_ROOT_BUILD_GN}" "webrtc-java Android JNI uses the generic C++ API" ANDROID_SDK_PATCH_POS)
++    if(ANDROID_SDK_PATCH_POS EQUAL -1)
++        set(ANDROID_SDK_DEPENDENCY "      \"sdk\",\n")
++        string(FIND "${WEBRTC_ROOT_BUILD_GN}" "${ANDROID_SDK_DEPENDENCY}" ANDROID_SDK_DEPENDENCY_POS)
++        if(ANDROID_SDK_DEPENDENCY_POS EQUAL -1)
++            message(FATAL_ERROR "Could not locate WebRTC's packaged Android SDK dependency")
++        endif()
++        string(REPLACE
++            "${ANDROID_SDK_DEPENDENCY}"
++            "      # webrtc-java Android JNI uses the generic C++ API directly.\n"
++            WEBRTC_ROOT_BUILD_GN
++            "${WEBRTC_ROOT_BUILD_GN}"
++        )
++        file(WRITE "${WEBRTC_SRC}/BUILD.gn" "${WEBRTC_ROOT_BUILD_GN}")
++    endif()
++
++    file(READ "${WEBRTC_SRC}/BUILD.gn" WEBRTC_ROOT_BUILD_GN)
++    string(FIND "${WEBRTC_ROOT_BUILD_GN}" "webrtc-java Android JNI uses the generic C++ API" ANDROID_SDK_PATCH_POS)
++    string(FIND "${WEBRTC_ROOT_BUILD_GN}" "      \"sdk\",\n" ANDROID_SDK_DEPENDENCY_POS)
++    if(ANDROID_SDK_PATCH_POS EQUAL -1)
++        message(FATAL_ERROR "Android WebRTC target edit marker is missing")
++    endif()
++    if(NOT ANDROID_SDK_DEPENDENCY_POS EQUAL -1)
++        message(FATAL_ERROR "Android WebRTC target still includes the packaged Java SDK graph")
++    endif()
++endif()
++
+ message(STATUS "WebRTC: generate")
++set(RTC_USE_H264 true)
++if(ANDROID)
++    set(RTC_USE_H264 false)
++endif()
+ set(COMPILE_ARGS "target_cpu=\"${TARGET_CPU}\" \
+ use_custom_libcxx=${CUSTOM_LIBCXX} \
+ is_clang=true \
+@@ -265,13 +396,18 @@ rtc_enable_protobuf=false \
+ rtc_build_examples=false \
+ rtc_include_tests=false \
+ use_rtti=true \
+-rtc_use_h264=true \
+-ffmpeg_branding=\"Chrome\" \
++rtc_use_h264=${RTC_USE_H264} \
+ symbol_level=0")
+ 
+-if(APPLE)
+-    set(COMPILE_ARGS "${COMPILE_ARGS} mac_deployment_target=\"${CMAKE_OSX_DEPLOYMENT_TARGET}\"")
++if(ANDROID)
++    # Chromium defaults Android static analysis to a local build-server mode
++    # that requires an interactive autoninja daemon. This CI build consumes
++    # only the native archive, so disable Java lint/error-prone validation.
++    set(COMPILE_ARGS "${COMPILE_ARGS} target_os=\"android\" android_static_analysis=\"off\"")
++elseif(APPLE)
++    set(COMPILE_ARGS "${COMPILE_ARGS} mac_deployment_target=\"${CMAKE_OSX_DEPLOYMENT_TARGET}\" ffmpeg_branding=\"Chrome\"")
+ elseif(LINUX)
++    set(COMPILE_ARGS "${COMPILE_ARGS} ffmpeg_branding=\"Chrome\"")
+     if(${TARGET_CPU} STREQUAL "arm")
+         set(COMPILE_ARGS "${COMPILE_ARGS} custom_toolchain=\"//build/toolchain/linux:clang_arm\"")
+     elseif(${TARGET_CPU} STREQUAL "arm64")
+@@ -296,6 +432,20 @@ if(APPLE)
+     execute_command(
+         COMMAND ${CMAKE_AR} rc ${WEBRTC_SRC}/${WEBRTC_BUILD}/obj/libwebrtc.a ${SDK_OBJC_FILES}
+     )
++elseif(ANDROID)
++    # Build only the native WebRTC archive consumed by webrtc-java. Ninja's
++    # default target also pulls in Chromium's Android Java build pipeline
++    # (Turbine, SDK test helpers, APK tooling, and other unrelated artifacts),
++    # which is unnecessary for this JNI library and is not part of the lean
++    # source checkout used by the CI job.
++    execute_command(
++        COMMAND ninja -C "${WEBRTC_BUILD}" webrtc
++        WORKING_DIRECTORY "${WEBRTC_SRC}"
++    )
++
++    if(NOT EXISTS "${WEBRTC_LIB_PATH}")
++        message(FATAL_ERROR "Android WebRTC build completed without producing ${WEBRTC_LIB_PATH}")
++    endif()
+ else()
+     execute_command(
+         COMMAND ninja -C "${WEBRTC_BUILD}"
+diff --git a/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp b/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp
+index 165411e0303b05bfc19a08b869f8ffd3ff05098a..f5c23c96ce6c0ddeb8a0139bf853da3742e4e407 100644
+--- a/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp
++++ b/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp
+@@ -36,7 +36,7 @@
+ #include "media/video/windows/WindowsVideoDeviceManager.h"
+ #include "media/video/desktop/windows/WindowsPowerManagement.h"
+ #endif
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+ #include "media/audio/linux/PulseAudioDeviceManager.h"
+ #include "media/video/linux/V4l2VideoDeviceManager.h"
+ #include "media/video/desktop/linux/LinuxPowerManagement.h"
+@@ -172,7 +172,7 @@ namespace jni
+ #ifdef _WIN32
+ 		audioDevManager = std::make_unique<avdev::WindowsAudioDeviceManager>();
+ #endif
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+ 		audioDevManager = std::make_unique<avdev::PulseAudioDeviceManager>();
+ #endif
+ #ifdef __APPLE__
+@@ -185,7 +185,7 @@ namespace jni
+ #ifdef _WIN32
+ 		videoDevManager = std::make_unique<avdev::WindowsVideoDeviceManager>();
+ #endif
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+ 		videoDevManager = std::make_unique<avdev::V4l2VideoDeviceManager>();
+ #endif
+ #ifdef __APPLE__
+@@ -198,11 +198,11 @@ namespace jni
+ #ifdef _WIN32
+ 		powerManagement = std::make_unique<avdev::WindowsPowerManagement>();
+ #endif
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+ 		powerManagement = std::make_unique<avdev::LinuxPowerManagement>();
+ #endif
+ #ifdef __APPLE__
+ 		powerManagement = std::make_unique<avdev::MacOSPowerManagement>();
+ #endif
+ 	}
+-}
+\ No newline at end of file
++}
+diff --git a/webrtc-jni/src/main/cpp/toolchain/aarch64-android-clang.cmake b/webrtc-jni/src/main/cpp/toolchain/aarch64-android-clang.cmake
+new file mode 100644
+index 0000000000000000000000000000000000000000..9328a041a0762ddaf5d35f0274f57d9f0c3b5d78
+--- /dev/null
++++ b/webrtc-jni/src/main/cpp/toolchain/aarch64-android-clang.cmake
+@@ -0,0 +1,17 @@
++# Android ARM64 toolchain for FCL/PojavLauncher HotSpot.
++# ANDROID_NDK_HOME is supplied by the GitHub Actions Android setup step.
++if(NOT DEFINED ENV{ANDROID_NDK_HOME})
++    message(FATAL_ERROR "ANDROID_NDK_HOME is required")
++endif()
++
++set(CMAKE_SYSTEM_NAME Android)
++set(CMAKE_ANDROID_NDK "$ENV{ANDROID_NDK_HOME}")
++set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)
++set(CMAKE_ANDROID_API 26)
++set(CMAKE_ANDROID_STL_TYPE c++_static)
++set(ANDROID_ABI arm64-v8a)
++set(ANDROID_PLATFORM android-26)
++set(ANDROID_STL c++_static)
++set(TARGET_CPU arm64)
++
++include("$ENV{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake")
