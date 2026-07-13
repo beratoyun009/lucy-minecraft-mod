@@ -122,10 +122,26 @@ index 424504df43283b007c8406ca181bc8780c171c86..84a0b6b75ba90a5a44a6bf56a54aabe1
 \ No newline at end of file
 +endif()
 diff --git a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
-index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..3b2ba4a0c7739e8ce0f858301875fcbd75adaea9 100644
+index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..4e636b65ba96fe6279013676c709be4c71313705 100644
 --- a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 +++ b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
-@@ -158,7 +158,9 @@ target_include_directories(${PROJECT_NAME}
+@@ -79,10 +79,15 @@ function(execute_command)
+         WORKING_DIRECTORY "${CMD_ARGS_WORKING_DIRECTORY}"
+         OUTPUT_VARIABLE COMMAND_OUTPUT
+         ERROR_VARIABLE COMMAND_ERROR
++        RESULT_VARIABLE COMMAND_RESULT
+     )
+ 
+     print("${COMMAND_OUTPUT}")
+     print("${COMMAND_ERROR}")
++
++    if(NOT COMMAND_RESULT EQUAL 0)
++        message(FATAL_ERROR "Command failed (${COMMAND_RESULT}): ${CMD_ARGS_COMMAND}")
++    endif()
+ endfunction()
+ 
+ function(sysroot_install)
+@@ -158,7 +163,9 @@ target_include_directories(${PROJECT_NAME}
  )
  target_link_libraries(${PROJECT_NAME} ${TARGET_LINK_LIB})
  
@@ -136,19 +152,86 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..3b2ba4a0c7739e8ce0f858301875fcbd
      target_include_directories(${PROJECT_NAME}
          PUBLIC
              ${TARGET_INC_DIR}/sdk/objc
-@@ -220,7 +222,10 @@ execute_command(
+@@ -202,27 +209,59 @@ set(ENV{PATH} "${WEBRTC_SRC_DIR}/depot_tools${PATH_SEP}$ENV{PATH}")
  
- message(STATUS "WebRTC: sync")
- execute_command(
+ file(MAKE_DIRECTORY ${WEBRTC_DIR})
+ 
+-message(STATUS "WebRTC: fetch")
+-execute_command(
+-    COMMAND fetch --nohooks webrtc
+-    WORKING_DIRECTORY "${WEBRTC_DIR}"
+-)
++set(WEBRTC_SYNC_STAMP "${WEBRTC_DIR}/.android-branch-7204-synced")
++if(NOT EXISTS "${WEBRTC_SYNC_STAMP}")
++    if(NOT EXISTS "${WEBRTC_SRC}/.git")
++        message(STATUS "WebRTC: fetch")
++        execute_command(
++            COMMAND fetch --nohooks webrtc
++            WORKING_DIRECTORY "${WEBRTC_DIR}"
++        )
++    endif()
+ 
+-message(STATUS "WebRTC: checkout \"${WEBRTC_BRANCH}\"")
+-execute_command(
+-    COMMAND git checkout .
+-    WORKING_DIRECTORY "${WEBRTC_SRC}"
+-)
+-execute_command(
+-    COMMAND git checkout ${WEBRTC_BRANCH}
+-    WORKING_DIRECTORY "${WEBRTC_SRC}"
+-)
++    message(STATUS "WebRTC: checkout \"${WEBRTC_BRANCH}\"")
++    execute_command(
++        COMMAND git checkout .
++        WORKING_DIRECTORY "${WEBRTC_SRC}"
++    )
++    execute_command(
++        COMMAND git checkout ${WEBRTC_BRANCH}
++        WORKING_DIRECTORY "${WEBRTC_SRC}"
++    )
+ 
+-message(STATUS "WebRTC: sync")
+-execute_command(
 -    COMMAND gclient sync
-+    # fetch first syncs the current WebRTC main branch. We then switch to the
-+    # pinned release branch, so force gclient to replace stale third_party
-+    # checkouts (notably cpu_features/ndk_compat) with that branch's DEPS.
-+    COMMAND gclient sync -D --force --reset
-     WORKING_DIRECTORY "${WEBRTC_DIR}"
- )
+-    WORKING_DIRECTORY "${WEBRTC_DIR}"
+-)
++    message(STATUS "WebRTC: sync")
++    execute_command(
++        # fetch first syncs the current WebRTC main branch. We then switch to
++        # the pinned release branch, so replace stale third_party checkouts.
++        COMMAND gclient sync -D --force --reset
++        WORKING_DIRECTORY "${WEBRTC_DIR}"
++    )
++
++    # branch-heads/7204 references the NDK compatibility target, but gclient
++    # can leave cpu_features at a revision without ndk_compat after switching
++    # from current main. Repair it deterministically before generating Ninja.
++    set(CPU_FEATURES_DIR "${WEBRTC_SRC}/third_party/cpu_features/src")
++    set(CPU_FEATURES_COMPAT "${CPU_FEATURES_DIR}/ndk_compat/cpu-features.c")
++    if(ANDROID AND NOT EXISTS "${CPU_FEATURES_COMPAT}")
++        message(STATUS "WebRTC: repair Android cpu_features checkout")
++        file(REMOVE_RECURSE "${CPU_FEATURES_DIR}")
++        execute_command(
++            COMMAND git clone https://chromium.googlesource.com/external/github.com/google/cpu_features "${CPU_FEATURES_DIR}"
++            WORKING_DIRECTORY "${WEBRTC_SRC}/third_party/cpu_features"
++        )
++        execute_command(
++            COMMAND git checkout ec7d390a9046ff11cf0f61df37493bbc140fbd38
++            WORKING_DIRECTORY "${CPU_FEATURES_DIR}"
++        )
++    endif()
++    if(ANDROID AND NOT EXISTS "${CPU_FEATURES_COMPAT}")
++        message(FATAL_ERROR "Android cpu_features compatibility source is still missing")
++    endif()
++
++    file(WRITE "${WEBRTC_SYNC_STAMP}" "${WEBRTC_BRANCH}\n")
++else()
++    message(STATUS "WebRTC: reuse cached, synchronized checkout")
++endif()
  
-@@ -252,6 +257,10 @@ if (PATCHES)
+ if(LINUX)
+     sysroot_install()
+@@ -252,6 +291,10 @@ if (PATCHES)
  endif()
  
  message(STATUS "WebRTC: generate")
@@ -159,22 +242,26 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..3b2ba4a0c7739e8ce0f858301875fcbd
  set(COMPILE_ARGS "target_cpu=\"${TARGET_CPU}\" \
  use_custom_libcxx=${CUSTOM_LIBCXX} \
  is_clang=true \
-@@ -265,11 +274,13 @@ rtc_enable_protobuf=false \
+@@ -265,13 +308,15 @@ rtc_enable_protobuf=false \
  rtc_build_examples=false \
  rtc_include_tests=false \
  use_rtti=true \
 -rtc_use_h264=true \
+-ffmpeg_branding=\"Chrome\" \
 +rtc_use_h264=${RTC_USE_H264} \
- ffmpeg_branding=\"Chrome\" \
  symbol_level=0")
  
 -if(APPLE)
+-    set(COMPILE_ARGS "${COMPILE_ARGS} mac_deployment_target=\"${CMAKE_OSX_DEPLOYMENT_TARGET}\"")
 +if(ANDROID)
 +    set(COMPILE_ARGS "${COMPILE_ARGS} target_os=\"android\"")
 +elseif(APPLE)
-     set(COMPILE_ARGS "${COMPILE_ARGS} mac_deployment_target=\"${CMAKE_OSX_DEPLOYMENT_TARGET}\"")
++    set(COMPILE_ARGS "${COMPILE_ARGS} mac_deployment_target=\"${CMAKE_OSX_DEPLOYMENT_TARGET}\" ffmpeg_branding=\"Chrome\"")
  elseif(LINUX)
++    set(COMPILE_ARGS "${COMPILE_ARGS} ffmpeg_branding=\"Chrome\"")
      if(${TARGET_CPU} STREQUAL "arm")
+         set(COMPILE_ARGS "${COMPILE_ARGS} custom_toolchain=\"//build/toolchain/linux:clang_arm\"")
+     elseif(${TARGET_CPU} STREQUAL "arm64")
 diff --git a/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp b/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp
 index 165411e0303b05bfc19a08b869f8ffd3ff05098a..f5c23c96ce6c0ddeb8a0139bf853da3742e4e407 100644
 --- a/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp
