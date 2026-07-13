@@ -122,7 +122,7 @@ index 424504df43283b007c8406ca181bc8780c171c86..84a0b6b75ba90a5a44a6bf56a54aabe1
 \ No newline at end of file
 +endif()
 diff --git a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
-index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..a2de7d1b39e9f8106d0bd31caa0844ecaaaee5d7 100644
+index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..ab31e8a3d3f6f5a0090dd33142e424ee4de2adbf 100644
 --- a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 +++ b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 @@ -79,10 +79,15 @@ function(execute_command)
@@ -296,7 +296,7 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..a2de7d1b39e9f8106d0bd31caa0844ec
  set(COMPILE_ARGS "target_cpu=\"${TARGET_CPU}\" \
  use_custom_libcxx=${CUSTOM_LIBCXX} \
  is_clang=true \
-@@ -265,13 +362,15 @@ rtc_enable_protobuf=false \
+@@ -265,13 +362,18 @@ rtc_enable_protobuf=false \
  rtc_build_examples=false \
  rtc_include_tests=false \
  use_rtti=true \
@@ -308,7 +308,10 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..a2de7d1b39e9f8106d0bd31caa0844ec
 -if(APPLE)
 -    set(COMPILE_ARGS "${COMPILE_ARGS} mac_deployment_target=\"${CMAKE_OSX_DEPLOYMENT_TARGET}\"")
 +if(ANDROID)
-+    set(COMPILE_ARGS "${COMPILE_ARGS} target_os=\"android\"")
++    # Chromium defaults Android static analysis to a local build-server mode
++    # that requires an interactive autoninja daemon. This CI build consumes
++    # only the native archive, so disable Java lint/error-prone validation.
++    set(COMPILE_ARGS "${COMPILE_ARGS} target_os=\"android\" android_static_analysis=\"off\"")
 +elseif(APPLE)
 +    set(COMPILE_ARGS "${COMPILE_ARGS} mac_deployment_target=\"${CMAKE_OSX_DEPLOYMENT_TARGET}\" ffmpeg_branding=\"Chrome\"")
  elseif(LINUX)
@@ -316,7 +319,7 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..a2de7d1b39e9f8106d0bd31caa0844ec
      if(${TARGET_CPU} STREQUAL "arm")
          set(COMPILE_ARGS "${COMPILE_ARGS} custom_toolchain=\"//build/toolchain/linux:clang_arm\"")
      elseif(${TARGET_CPU} STREQUAL "arm64")
-@@ -296,6 +395,20 @@ if(APPLE)
+@@ -296,6 +398,20 @@ if(APPLE)
      execute_command(
          COMMAND ${CMAKE_AR} rc ${WEBRTC_SRC}/${WEBRTC_BUILD}/obj/libwebrtc.a ${SDK_OBJC_FILES}
      )
