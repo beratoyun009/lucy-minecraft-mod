@@ -6,7 +6,7 @@ on:
     branches:
       - oasis-1.1.6-android-fcl
     paths:
-      - ".github/workflows/android-fcl.yml"
+      - ".github/workflows/build.yml"
       - "android-fcl/webrtc-java-android.patch"
       - "src/**"
       - "build.gradle"
