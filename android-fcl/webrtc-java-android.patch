@@ -44,7 +44,7 @@ index 8d7f9afcc9fcaa48a4d7df495562a9fd6d97244f..53fc9dbb3877b3327afc2934be6c1255
  			<id>windows-x86_64</id>
  			<activation>
 diff --git a/webrtc-jni/src/main/cpp/CMakeLists.txt b/webrtc-jni/src/main/cpp/CMakeLists.txt
-index a761f4c0e66c724c325b3f1c89a3d9877485dd3a..d151ffb832a79abc1f3c4350a57d23526d31c640 100644
+index a761f4c0e66c724c325b3f1c89a3d9877485dd3a..ae607a90af9f204a8cb27894e5560e170a5e863a 100644
 --- a/webrtc-jni/src/main/cpp/CMakeLists.txt
 +++ b/webrtc-jni/src/main/cpp/CMakeLists.txt
 @@ -7,7 +7,9 @@ endif()
@@ -70,7 +70,7 @@ index a761f4c0e66c724c325b3f1c89a3d9877485dd3a..d151ffb832a79abc1f3c4350a57d2352
      set(CMAKE_CXX_VISIBILITY_PRESET hidden)
      set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -s")
      set(SOURCE_TARGET macos)
-@@ -76,6 +81,15 @@ list(APPEND SOURCES
+@@ -76,6 +81,17 @@ list(APPEND SOURCES
      ${SOURCES_RTC}
  )
  
@@ -79,14 +79,16 @@ index a761f4c0e66c724c325b3f1c89a3d9877485dd3a..d151ffb832a79abc1f3c4350a57d2352
 +    # desktop-only capture/device entry points which require X11, V4L2, udev,
 +    # PulseAudio or DBus and are never called by the mod.
 +    list(FILTER SOURCES EXCLUDE REGEX "JNI_(AudioDeviceModule|DesktopCapturer|MediaDevices|PowerManagement|ScreenCapturer|VideoCapture|VideoDesktopSource|VideoDeviceSource|WindowCapturer)\\.cpp$")
-+    list(FILTER SOURCES EXCLUDE REGEX "src/media/video/(VideoCapture|VideoDevice|VideoTrackDesktopSource|VideoTrackDeviceSource)")
++    # Keep VideoDevice.cpp: it contains platform-neutral Java conversion
++    # helpers used by DeviceChangeListener even when physical capture is off.
++    list(FILTER SOURCES EXCLUDE REGEX "src/media/video/(VideoCapture|VideoTrackDesktopSource|VideoTrackDeviceSource)")
 +    list(FILTER SOURCES EXCLUDE REGEX "src/media/video/desktop/")
 +endif()
 +
  add_library(${PROJECT_NAME} SHARED ${SOURCES})
  
  # Introduced since WebRTC branch 7204 and Clang 20.
-@@ -99,7 +113,9 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
+@@ -99,7 +115,9 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
  target_link_libraries(${PROJECT_NAME} jni-voithos)
  target_link_libraries(${PROJECT_NAME} webrtc)
  
