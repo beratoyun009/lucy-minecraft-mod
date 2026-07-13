@@ -27,6 +27,20 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
+      - name: Build ARM64 Android compatibility shims
+        shell: bash
+        run: |
+          set -euo pipefail
+          CLANG="${ANDROID_NDK_LATEST_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          test -x "$CLANG"
+          OUT="src/client/resources/oasis-natives/android-aarch64"
+          mkdir -p "$OUT"
+          for LIB in             libdbus-1.so.3             libX11.so.6             libXfixes.so.3             libXrandr.so.2             libXcomposite.so.1             libudev.so.1             libpulse.so.0
+          do
+            "$CLANG" -shared -fPIC -nostdlib               android-fcl/native/desktop_service_stubs.c               -Wl,--version-script=android-fcl/native/stubs.map               -Wl,-soname,"$LIB"               -o "$OUT/$LIB"
+          done
+          file "$OUT"/*.so*
+
       - name: Build Fabric mod
         run: ./gradlew build --stacktrace
 
