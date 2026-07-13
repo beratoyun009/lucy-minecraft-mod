@@ -122,7 +122,7 @@ index 424504df43283b007c8406ca181bc8780c171c86..84a0b6b75ba90a5a44a6bf56a54aabe1
 \ No newline at end of file
 +endif()
 diff --git a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
-index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..cd2e59c3cc86b2d83de6deaaf64a1651137f4aef 100644
+index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..d75ee95de6cbc6d8150acee71edd140bd46daa38 100644
 --- a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 +++ b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 @@ -79,10 +79,15 @@ function(execute_command)
@@ -285,17 +285,40 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..cd2e59c3cc86b2d83de6deaaf64a1651
  
  if(LINUX)
      sysroot_install()
-@@ -251,7 +344,22 @@ if (PATCHES)
+@@ -251,7 +344,45 @@ if (PATCHES)
      endforeach(PATCH)
  endif()
  
 +if(ANDROID)
-+    # The Android patch removes WebRTC's packaged Java SDK from the static
-+    # archive graph. Verify the semantic change because a cached checkout may
-+    # already contain the patch, in which case git apply reports it as applied.
++    # webrtc-java uses WebRTC's generic C++ API directly. The root Android
++    # target otherwise also pulls in the separately packaged Java SDK and its
++    # libjingle_peerconnection_so.so, neither of which this JNI library loads.
++    # Edit the exact dependency entry idempotently so restored checkouts do not
++    # depend on git-patch context or whether a prior cache already contains it.
 +    file(READ "${WEBRTC_SRC}/BUILD.gn" WEBRTC_ROOT_BUILD_GN)
 +    string(FIND "${WEBRTC_ROOT_BUILD_GN}" "webrtc-java Android JNI uses the generic C++ API" ANDROID_SDK_PATCH_POS)
 +    if(ANDROID_SDK_PATCH_POS EQUAL -1)
++        set(ANDROID_SDK_DEPENDENCY "      \"sdk\",\n")
++        string(FIND "${WEBRTC_ROOT_BUILD_GN}" "${ANDROID_SDK_DEPENDENCY}" ANDROID_SDK_DEPENDENCY_POS)
++        if(ANDROID_SDK_DEPENDENCY_POS EQUAL -1)
++            message(FATAL_ERROR "Could not locate WebRTC's packaged Android SDK dependency")
++        endif()
++        string(REPLACE
++            "${ANDROID_SDK_DEPENDENCY}"
++            "      # webrtc-java Android JNI uses the generic C++ API directly.\n"
++            WEBRTC_ROOT_BUILD_GN
++            "${WEBRTC_ROOT_BUILD_GN}"
++        )
++        file(WRITE "${WEBRTC_SRC}/BUILD.gn" "${WEBRTC_ROOT_BUILD_GN}")
++    endif()
++
++    file(READ "${WEBRTC_SRC}/BUILD.gn" WEBRTC_ROOT_BUILD_GN)
++    string(FIND "${WEBRTC_ROOT_BUILD_GN}" "webrtc-java Android JNI uses the generic C++ API" ANDROID_SDK_PATCH_POS)
++    string(FIND "${WEBRTC_ROOT_BUILD_GN}" "      \"sdk\",\n" ANDROID_SDK_DEPENDENCY_POS)
++    if(ANDROID_SDK_PATCH_POS EQUAL -1)
++        message(FATAL_ERROR "Android WebRTC target edit marker is missing")
++    endif()
++    if(NOT ANDROID_SDK_DEPENDENCY_POS EQUAL -1)
 +        message(FATAL_ERROR "Android WebRTC target still includes the packaged Java SDK graph")
 +    endif()
 +endif()
@@ -308,7 +331,7 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..cd2e59c3cc86b2d83de6deaaf64a1651
  set(COMPILE_ARGS "target_cpu=\"${TARGET_CPU}\" \
  use_custom_libcxx=${CUSTOM_LIBCXX} \
  is_clang=true \
-@@ -265,13 +373,18 @@ rtc_enable_protobuf=false \
+@@ -265,13 +396,18 @@ rtc_enable_protobuf=false \
  rtc_build_examples=false \
  rtc_include_tests=false \
  use_rtti=true \
@@ -331,7 +354,7 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..cd2e59c3cc86b2d83de6deaaf64a1651
      if(${TARGET_CPU} STREQUAL "arm")
          set(COMPILE_ARGS "${COMPILE_ARGS} custom_toolchain=\"//build/toolchain/linux:clang_arm\"")
      elseif(${TARGET_CPU} STREQUAL "arm64")
-@@ -296,6 +409,20 @@ if(APPLE)
+@@ -296,6 +432,20 @@ if(APPLE)
      execute_command(
          COMMAND ${CMAKE_AR} rc ${WEBRTC_SRC}/${WEBRTC_BUILD}/obj/libwebrtc.a ${SDK_OBJC_FILES}
      )
@@ -352,31 +375,6 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..cd2e59c3cc86b2d83de6deaaf64a1651
  else()
      execute_command(
          COMMAND ninja -C "${WEBRTC_BUILD}"
-diff --git a/webrtc-jni/src/main/cpp/dependencies/webrtc/patches/android/remove_packaged_sdk.patch b/webrtc-jni/src/main/cpp/dependencies/webrtc/patches/android/remove_packaged_sdk.patch
-new file mode 100644
-index 0000000000000000000000000000000000000000..bddedf9f6846bc114c60750b76a0bd1a9e14c0d2
---- /dev/null
-+++ b/webrtc-jni/src/main/cpp/dependencies/webrtc/patches/android/remove_packaged_sdk.patch
-@@ -0,0 +1,19 @@
-+diff --git a/BUILD.gn b/BUILD.gn
-+--- a/BUILD.gn
-++++ b/BUILD.gn
-+@@ -563,6 +563,5 @@ if (!build_with_chromium) {
-+       "modules/video_capture:video_capture_internal_impl",
-+       "pc:libjingle_peerconnection",
-+       "pc:rtc_pc",
-+-      "sdk",
-+       "video",
-+     ]
-++@@ -570,1 +569,8 @@ if (!build_with_chromium) {
-++    # webrtc-java Android JNI uses the generic C++ API directly. The sdk
-++    # group is the separately packaged Java/Android WebRTC distribution and
-++    # links libjingle_peerconnection_so.so, which is not consumed here.
-++    if (!is_android) {
-++      deps += [ "sdk" ]
-++    }
-++
-+     if (rtc_include_builtin_audio_codecs) {
 diff --git a/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp b/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp
 index 165411e0303b05bfc19a08b869f8ffd3ff05098a..f5c23c96ce6c0ddeb8a0139bf853da3742e4e407 100644
 --- a/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp

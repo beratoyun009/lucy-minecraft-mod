@@ -59,8 +59,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/webrtc-checkout
-          key: webrtc-src-7204-android-arm64-v5
+          key: webrtc-src-7204-android-arm64-v6
           restore-keys: |
+            webrtc-src-7204-android-arm64-v5
             webrtc-src-7204-android-arm64-v4
             webrtc-src-7204-android-arm64-v3
             webrtc-src-7204-android-arm64-v2
@@ -96,7 +97,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/webrtc-checkout
-          key: webrtc-src-7204-android-arm64-v5
+          key: webrtc-src-7204-android-arm64-v6
 
       - name: Report WebRTC checkout size
         if: always()
