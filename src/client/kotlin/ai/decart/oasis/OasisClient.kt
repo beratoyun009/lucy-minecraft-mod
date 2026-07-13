@@ -392,7 +392,7 @@ object OasisClient : ClientModInitializer {
 				stop()
 				return@launch
 			}
-			Utils.log("Config: $config")
+			Utils.log("Session configuration response received: ${config.javaClass.simpleName}")
 
 			// display the error message if there is one
 			when (config) {
