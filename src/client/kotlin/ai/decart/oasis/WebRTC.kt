@@ -4,6 +4,7 @@ import dev.onvoid.webrtc.logging.Logging
 import dev.onvoid.webrtc.logging.LogSink
 import dev.onvoid.webrtc.media.MediaStream
 import dev.onvoid.webrtc.media.MediaType
+import dev.onvoid.webrtc.media.audio.HeadlessAudioDeviceModule
 import dev.onvoid.webrtc.PeerConnectionFactory
 import dev.onvoid.webrtc.PeerConnectionObserver
 import dev.onvoid.webrtc.RTCConfiguration
@@ -23,12 +24,25 @@ import dev.onvoid.webrtc.RTCSignalingState
 import ai.decart.oasis.Utils
 
 object WebRTC {
-	val peerConnectionFactory = run {
+	init {
 		AndroidNativeBootstrap.prepare()
-		PeerConnectionFactory()
+	}
+
+	private val headlessAudioModule by lazy {
+		Utils.log("Creating headless WebRTC audio module")
+		HeadlessAudioDeviceModule()
+	}
+
+	val peerConnectionFactory by lazy {
+		Utils.log("Creating WebRTC peer connection factory with headless audio")
+		PeerConnectionFactory(headlessAudioModule)
 	}
 
 	fun enableLogging() {
+		if (System.getProperty("os.arch") == "aarch64") {
+			Utils.log("Skipping native WebRTC logger during Android startup")
+			return
+		}
 		Logging.logToDebug(Logging.Severity.INFO)
 		Logging.logThreads(true)
 		Logging.logTimestamps(true)
