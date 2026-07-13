@@ -122,7 +122,7 @@ index 424504df43283b007c8406ca181bc8780c171c86..84a0b6b75ba90a5a44a6bf56a54aabe1
 \ No newline at end of file
 +endif()
 diff --git a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
-index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..82908cd1b8447254d71ab42d0b43e95e288e2cff 100644
+index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..a2de7d1b39e9f8106d0bd31caa0844ecaaaee5d7 100644
 --- a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 +++ b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
 @@ -79,10 +79,15 @@ function(execute_command)
@@ -152,7 +152,7 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..82908cd1b8447254d71ab42d0b43e95e
      target_include_directories(${PROJECT_NAME}
          PUBLIC
              ${TARGET_INC_DIR}/sdk/objc
-@@ -202,27 +209,79 @@ set(ENV{PATH} "${WEBRTC_SRC_DIR}/depot_tools${PATH_SEP}$ENV{PATH}")
+@@ -202,27 +209,113 @@ set(ENV{PATH} "${WEBRTC_SRC_DIR}/depot_tools${PATH_SEP}$ENV{PATH}")
  
  file(MAKE_DIRECTORY ${WEBRTC_DIR})
  
@@ -161,7 +161,7 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..82908cd1b8447254d71ab42d0b43e95e
 -    COMMAND fetch --nohooks webrtc
 -    WORKING_DIRECTORY "${WEBRTC_DIR}"
 -)
-+set(WEBRTC_SYNC_STAMP "${WEBRTC_DIR}/.android-branch-7204-synced")
++set(WEBRTC_SYNC_STAMP "${WEBRTC_DIR}/.android-branch-7204-synced-v2")
 +if(NOT EXISTS "${WEBRTC_SYNC_STAMP}")
 +    if(NOT EXISTS "${WEBRTC_SRC}/.git")
 +        message(STATUS "WebRTC: fetch")
@@ -195,6 +195,21 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..82908cd1b8447254d71ab42d0b43e95e
 -    COMMAND gclient sync
 -    WORKING_DIRECTORY "${WEBRTC_DIR}"
 -)
++    if(ANDROID)
++        # fetch creates a desktop-oriented .gclient file by default. Declaring
++        # Android here makes gclient evaluate every checkout_android entry in
++        # the pinned DEPS file, including native sources and pinned CIPD Java
++        # tools used to generate Android JNI headers.
++        set(GCLIENT_FILE "${WEBRTC_DIR}/.gclient")
++        file(READ "${GCLIENT_FILE}" GCLIENT_CONFIG)
++        if(GCLIENT_CONFIG MATCHES "target_os[ \t]*=")
++            string(REGEX REPLACE "target_os[ \t]*=[^\r\n]*" "target_os = ['android']" GCLIENT_CONFIG "${GCLIENT_CONFIG}")
++        else()
++            string(APPEND GCLIENT_CONFIG "\ntarget_os = ['android']\n")
++        endif()
++        file(WRITE "${GCLIENT_FILE}" "${GCLIENT_CONFIG}")
++    endif()
++
 +    message(STATUS "WebRTC: sync")
 +    execute_command(
 +        # fetch first syncs the current WebRTC main branch. We then switch to
@@ -230,6 +245,25 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..82908cd1b8447254d71ab42d0b43e95e
 +endif()
 +
 +if(ANDROID)
++    # Turbine generates a small Android Java source archive required by one
++    # of WebRTC's native JNI-header targets. Keep a deterministic fallback in
++    # case a restored checkout predates the Android-aware gclient sync.
++    set(TURBINE_ROOT "${WEBRTC_SRC}/third_party/turbine/cipd")
++    set(TURBINE_JAR "${TURBINE_ROOT}/turbine.jar")
++    if(NOT EXISTS "${TURBINE_JAR}")
++        message(STATUS "WebRTC: install pinned Turbine package")
++        file(MAKE_DIRECTORY "${TURBINE_ROOT}")
++        set(TURBINE_ENSURE_FILE "${WEBRTC_DIR}/.turbine.ensure")
++        file(WRITE "${TURBINE_ENSURE_FILE}" "chromium/third_party/turbine VGtOG2ivl1SJR7Lai5FQddIu15mWCYDnp47QtozMQeoC\n")
++        execute_command(
++            COMMAND cipd ensure -root "${TURBINE_ROOT}" -ensure-file "${TURBINE_ENSURE_FILE}"
++            WORKING_DIRECTORY "${WEBRTC_DIR}"
++        )
++    endif()
++    if(NOT EXISTS "${TURBINE_JAR}")
++        message(FATAL_ERROR "Pinned Android Turbine package did not provide ${TURBINE_JAR}")
++    endif()
++
 +    # The Chromium checkout intentionally omits the large prebuilt Android
 +    # SDK payload on this host. GitHub's runner already provides the complete
 +    # SDK, so expose that whole layout at the path GN expects. Mapping the
@@ -251,7 +285,7 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..82908cd1b8447254d71ab42d0b43e95e
  
  if(LINUX)
      sysroot_install()
-@@ -252,6 +311,10 @@ if (PATCHES)
+@@ -252,6 +345,10 @@ if (PATCHES)
  endif()
  
  message(STATUS "WebRTC: generate")
@@ -262,7 +296,7 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..82908cd1b8447254d71ab42d0b43e95e
  set(COMPILE_ARGS "target_cpu=\"${TARGET_CPU}\" \
  use_custom_libcxx=${CUSTOM_LIBCXX} \
  is_clang=true \
-@@ -265,13 +328,15 @@ rtc_enable_protobuf=false \
+@@ -265,13 +362,15 @@ rtc_enable_protobuf=false \
  rtc_build_examples=false \
  rtc_include_tests=false \
  use_rtti=true \
@@ -282,7 +316,7 @@ index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..82908cd1b8447254d71ab42d0b43e95e
      if(${TARGET_CPU} STREQUAL "arm")
          set(COMPILE_ARGS "${COMPILE_ARGS} custom_toolchain=\"//build/toolchain/linux:clang_arm\"")
      elseif(${TARGET_CPU} STREQUAL "arm64")
-@@ -296,6 +361,20 @@ if(APPLE)
+@@ -296,6 +395,20 @@ if(APPLE)
      execute_command(
          COMMAND ${CMAKE_AR} rc ${WEBRTC_SRC}/${WEBRTC_BUILD}/obj/libwebrtc.a ${SDK_OBJC_FILES}
      )
