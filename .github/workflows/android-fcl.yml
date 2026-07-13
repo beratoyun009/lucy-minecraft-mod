@@ -46,6 +46,21 @@ jobs:
           test -d "${ANDROID_NDK_LATEST_HOME}"
           echo "ANDROID_NDK_HOME=${ANDROID_NDK_LATEST_HOME}" >> "${GITHUB_ENV}"
 
+      - name: Restore Maven cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: maven-webrtc-java-0.14.0-${{ runner.os }}
+          restore-keys: |
+            maven-webrtc-java-0.14.0-
+
+      - name: Restore synchronized WebRTC checkout
+        id: webrtc-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/webrtc-checkout
+          key: webrtc-src-7204-android-arm64-v2
+
       - name: Check out webrtc-java 0.14.0
         shell: bash
         run: |
@@ -70,6 +85,19 @@ jobs:
             -Dcmake.toolchain.file=toolchain/aarch64-android-clang.cmake \
             -Dwebrtc.src.dir="${RUNNER_TEMP}/webrtc-checkout" \
             -Dwebrtc.install.dir="${RUNNER_TEMP}/webrtc-install"
+
+      - name: Save synchronized WebRTC checkout
+        if: always() && steps.webrtc-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/webrtc-checkout
+          key: webrtc-src-7204-android-arm64-v2
+
+      - name: Report WebRTC checkout size
+        if: always()
+        shell: bash
+        run: du -sh "${RUNNER_TEMP}/webrtc-checkout" || true
 
       - name: Verify Android native dependencies
         shell: bash
