@@ -1,0 +1,210 @@
+diff --git a/pom.xml b/pom.xml
+index e33daced4b20621ef7bb30391669f6109bb206db..15cdb9e98eec9bbc1a541046900f4782b62de9fc 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -248,6 +248,16 @@
+ 	</build>
+ 
+ 	<profiles>
++		<!-- Android/FCL deliberately publishes under the linux-aarch64 classifier.
++		     FCL's HotSpot VM reports os.name=Linux, so NativeLoader looks for that
++		     classifier even though the binary itself must target Android/Bionic. -->
++		<profile>
++			<id>android-aarch64</id>
++			<properties>
++				<platform.classifier>linux-aarch64</platform.classifier>
++				<platform.module>webrtc.linux.aarch64</platform.module>
++			</properties>
++		</profile>
+ 		<profile>
+ 			<id>release</id>
+ 			<build>
+@@ -374,4 +384,4 @@
+ 			<scope>test</scope>
+ 		</dependency>
+ 	</dependencies>
+-</project>
+\ No newline at end of file
++</project>
+diff --git a/webrtc-jni/pom.xml b/webrtc-jni/pom.xml
+index 8d7f9afcc9fcaa48a4d7df495562a9fd6d97244f..53fc9dbb3877b3327afc2934be6c1255fcaf658a 100644
+--- a/webrtc-jni/pom.xml
++++ b/webrtc-jni/pom.xml
+@@ -136,6 +136,12 @@
+ 	</build>
+ 
+ 	<profiles>
++		<profile>
++			<id>android-aarch64</id>
++			<properties>
++				<cmake.toolchain.file>toolchain/aarch64-android-clang.cmake</cmake.toolchain.file>
++			</properties>
++		</profile>
+ 		<profile>
+ 			<id>windows-x86_64</id>
+ 			<activation>
+diff --git a/webrtc-jni/src/main/cpp/CMakeLists.txt b/webrtc-jni/src/main/cpp/CMakeLists.txt
+index a761f4c0e66c724c325b3f1c89a3d9877485dd3a..d151ffb832a79abc1f3c4350a57d23526d31c640 100644
+--- a/webrtc-jni/src/main/cpp/CMakeLists.txt
++++ b/webrtc-jni/src/main/cpp/CMakeLists.txt
+@@ -7,7 +7,9 @@ endif()
+ 
+ project(webrtc-java)
+ 
+-if(UNIX AND NOT APPLE)
++if(ANDROID)
++    set(SOURCE_TARGET android)
++elseif(UNIX AND NOT APPLE)
+     # Apply the sysroot configuration for the actual build
+     if(DEFERRED_SYSROOT)
+         # Configure sysroot for all subsequent operations
+@@ -27,7 +29,10 @@ if(UNIX AND NOT APPLE)
+     set(LINUX TRUE)
+ endif()
+ 
+-if(APPLE)
++if(ANDROID)
++    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
++    set(SOURCE_TARGET android)
++elseif(APPLE)
+     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -s")
+     set(SOURCE_TARGET macos)
+@@ -76,6 +81,15 @@ list(APPEND SOURCES
+     ${SOURCES_RTC}
+ )
+ 
++if(ANDROID)
++    # Oasis supplies its own frames and uses HeadlessAudioDeviceModule. Avoid
++    # desktop-only capture/device entry points which require X11, V4L2, udev,
++    # PulseAudio or DBus and are never called by the mod.
++    list(FILTER SOURCES EXCLUDE REGEX "JNI_(AudioDeviceModule|DesktopCapturer|MediaDevices|PowerManagement|ScreenCapturer|VideoCapture|VideoDesktopSource|VideoDeviceSource|WindowCapturer)\\.cpp$")
++    list(FILTER SOURCES EXCLUDE REGEX "src/media/video/(VideoCapture|VideoDevice|VideoTrackDesktopSource|VideoTrackDeviceSource)")
++    list(FILTER SOURCES EXCLUDE REGEX "src/media/video/desktop/")
++endif()
++
+ add_library(${PROJECT_NAME} SHARED ${SOURCES})
+ 
+ # Introduced since WebRTC branch 7204 and Clang 20.
+@@ -99,7 +113,9 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
+ target_link_libraries(${PROJECT_NAME} jni-voithos)
+ target_link_libraries(${PROJECT_NAME} webrtc)
+ 
+-if(APPLE)
++if(ANDROID)
++    target_link_libraries(${PROJECT_NAME} android log dl)
++elseif(APPLE)
+     set_source_files_properties(${SOURCES} PROPERTIES COMPILE_FLAGS "-x objective-c++")
+     target_link_options(${PROJECT_NAME} PRIVATE "-ObjC")
+     target_link_libraries(${PROJECT_NAME} "-framework Foundation" "-framework AVFoundation" "-framework CoreMedia" "-framework CoreAudio" "-framework IOKit" "-framework CoreVideo" "-framework VideoToolbox" "-framework QuartzCore")
+diff --git a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
+index a11a7b5e0741e2951acca3d6100b4e9083f3ee31..0801894754de8649461b4540936327368ae6c455 100644
+--- a/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
++++ b/webrtc-jni/src/main/cpp/dependencies/webrtc/CMakeLists.txt
+@@ -158,7 +158,9 @@ target_include_directories(${PROJECT_NAME}
+ )
+ target_link_libraries(${PROJECT_NAME} ${TARGET_LINK_LIB})
+ 
+-if(APPLE)
++if(ANDROID)
++    target_compile_definitions(${PROJECT_NAME} PUBLIC WEBRTC_ANDROID WEBRTC_POSIX)
++elseif(APPLE)
+     target_include_directories(${PROJECT_NAME}
+         PUBLIC
+             ${TARGET_INC_DIR}/sdk/objc
+@@ -252,6 +254,10 @@ if (PATCHES)
+ endif()
+ 
+ message(STATUS "WebRTC: generate")
++set(RTC_USE_H264 true)
++if(ANDROID)
++    set(RTC_USE_H264 false)
++endif()
+ set(COMPILE_ARGS "target_cpu=\"${TARGET_CPU}\" \
+ use_custom_libcxx=${CUSTOM_LIBCXX} \
+ is_clang=true \
+@@ -265,11 +271,13 @@ rtc_enable_protobuf=false \
+ rtc_build_examples=false \
+ rtc_include_tests=false \
+ use_rtti=true \
+-rtc_use_h264=true \
++rtc_use_h264=${RTC_USE_H264} \
+ ffmpeg_branding=\"Chrome\" \
+ symbol_level=0")
+ 
+-if(APPLE)
++if(ANDROID)
++    set(COMPILE_ARGS "${COMPILE_ARGS} target_os=\"android\"")
++elseif(APPLE)
+     set(COMPILE_ARGS "${COMPILE_ARGS} mac_deployment_target=\"${CMAKE_OSX_DEPLOYMENT_TARGET}\"")
+ elseif(LINUX)
+     if(${TARGET_CPU} STREQUAL "arm")
+diff --git a/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp b/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp
+index 165411e0303b05bfc19a08b869f8ffd3ff05098a..f5c23c96ce6c0ddeb8a0139bf853da3742e4e407 100644
+--- a/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp
++++ b/webrtc-jni/src/main/cpp/src/WebRTCContext.cpp
+@@ -36,7 +36,7 @@
+ #include "media/video/windows/WindowsVideoDeviceManager.h"
+ #include "media/video/desktop/windows/WindowsPowerManagement.h"
+ #endif
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+ #include "media/audio/linux/PulseAudioDeviceManager.h"
+ #include "media/video/linux/V4l2VideoDeviceManager.h"
+ #include "media/video/desktop/linux/LinuxPowerManagement.h"
+@@ -172,7 +172,7 @@ namespace jni
+ #ifdef _WIN32
+ 		audioDevManager = std::make_unique<avdev::WindowsAudioDeviceManager>();
+ #endif
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+ 		audioDevManager = std::make_unique<avdev::PulseAudioDeviceManager>();
+ #endif
+ #ifdef __APPLE__
+@@ -185,7 +185,7 @@ namespace jni
+ #ifdef _WIN32
+ 		videoDevManager = std::make_unique<avdev::WindowsVideoDeviceManager>();
+ #endif
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+ 		videoDevManager = std::make_unique<avdev::V4l2VideoDeviceManager>();
+ #endif
+ #ifdef __APPLE__
+@@ -198,11 +198,11 @@ namespace jni
+ #ifdef _WIN32
+ 		powerManagement = std::make_unique<avdev::WindowsPowerManagement>();
+ #endif
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+ 		powerManagement = std::make_unique<avdev::LinuxPowerManagement>();
+ #endif
+ #ifdef __APPLE__
+ 		powerManagement = std::make_unique<avdev::MacOSPowerManagement>();
+ #endif
+ 	}
+-}
+\ No newline at end of file
++}
+diff --git a/webrtc-jni/src/main/cpp/toolchain/aarch64-android-clang.cmake b/webrtc-jni/src/main/cpp/toolchain/aarch64-android-clang.cmake
+new file mode 100644
+index 0000000000000000000000000000000000000000..9328a041a0762ddaf5d35f0274f57d9f0c3b5d78
+--- /dev/null
++++ b/webrtc-jni/src/main/cpp/toolchain/aarch64-android-clang.cmake
+@@ -0,0 +1,17 @@
++# Android ARM64 toolchain for FCL/PojavLauncher HotSpot.
++# ANDROID_NDK_HOME is supplied by the GitHub Actions Android setup step.
++if(NOT DEFINED ENV{ANDROID_NDK_HOME})
++    message(FATAL_ERROR "ANDROID_NDK_HOME is required")
++endif()
++
++set(CMAKE_SYSTEM_NAME Android)
++set(CMAKE_ANDROID_NDK "$ENV{ANDROID_NDK_HOME}")
++set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)
++set(CMAKE_ANDROID_API 26)
++set(CMAKE_ANDROID_STL_TYPE c++_static)
++set(ANDROID_ABI arm64-v8a)
++set(ANDROID_PLATFORM android-26)
++set(ANDROID_STL c++_static)
++set(TARGET_CPU arm64)
++
++include("$ENV{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake")
