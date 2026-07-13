@@ -1,20 +1,26 @@
-name: Android FCL compatibility build
+name: Android FCL native WebRTC build
 
 on:
   workflow_dispatch:
   push:
     branches:
       - android-fcl
+    paths:
+      - ".github/workflows/android-fcl.yml"
+      - "android-fcl/webrtc-java-android.patch"
+      - "src/**"
+      - "build.gradle"
+      - "gradle.properties"
 
 permissions:
   contents: read
 
 jobs:
   build-mod:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
     steps:
-      - name: Check out source
+      - name: Check out mod source
         uses: actions/checkout@v4
 
       - name: Set up Java 21
@@ -24,29 +30,80 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      - name: Make Gradle wrapper executable
-        run: chmod +x gradlew
-
-      - name: Build ARM64 Android compatibility shims
+      - name: Free runner disk space
         shell: bash
         run: |
           set -euo pipefail
-          CLANG="${ANDROID_NDK_LATEST_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
-          test -x "$CLANG"
-          OUT="src/client/resources/oasis-natives/android-aarch64"
-          mkdir -p "$OUT"
-          for LIB in             libdbus-1.so.3             libX11.so.6             libXfixes.so.3             libXrandr.so.2             libXcomposite.so.1             libudev.so.1             libpulse.so.0
-          do
-            "$CLANG" -shared -fPIC -nostdlib               android-fcl/native/desktop_service_stubs.c               -Wl,--version-script=android-fcl/native/stubs.map               -Wl,-soname,"$LIB"               -o "$OUT/$LIB"
-          done
-          file "$OUT"/*.so*
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
 
-      - name: Build Fabric mod
-        run: ./gradlew build --stacktrace
+      - name: Install native build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y cmake curl git maven ninja-build python3 unzip
+          test -d "${ANDROID_NDK_LATEST_HOME}"
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_LATEST_HOME}" >> "${GITHUB_ENV}"
 
-      - name: Upload mod JARs
+      - name: Check out webrtc-java 0.14.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/devopvoid/webrtc-java.git "${RUNNER_TEMP}/webrtc-java"
+          cd "${RUNNER_TEMP}/webrtc-java"
+          git checkout d6642ec41c77e3d9ff5feb963aeafb196743716e
+          git apply "${GITHUB_WORKSPACE}/android-fcl/webrtc-java-android.patch"
+          git diff --check
+          git status --short
+
+      - name: Build Android ARM64 WebRTC JNI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/webrtc-java"
+          mvn -B -pl webrtc-jni -am package \
+            -DskipTests \
+            -Pandroid-aarch64 \
+            -Dwebrtc.src.dir="${RUNNER_TEMP}/webrtc-checkout" \
+            -Dwebrtc.install.dir="${RUNNER_TEMP}/webrtc-install"
+
+      - name: Verify Android native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          SO="$(find "${RUNNER_TEMP}/webrtc-java/webrtc-jni/target/lib" -name 'libwebrtc-java-linux-aarch64.so' -print -quit)"
+          test -n "$SO"
+          READELF="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          "$READELF" -h "$SO"
+          "$READELF" -d "$SO" | tee "${GITHUB_WORKSPACE}/android-native-dependencies.txt"
+          if grep -Eq 'libstdc\+\+|libc\.so\.6|ld-linux|libpulse|libX11|libudev|libdbus' "${GITHUB_WORKSPACE}/android-native-dependencies.txt"; then
+            echo "Desktop GNU/Linux dependency detected in Android binary"
+            exit 1
+          fi
+
+      - name: Build Fabric mod with Android WebRTC
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew build --stacktrace
+
+      - name: Verify packaged Android WebRTC
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR="$(find build/libs -maxdepth 1 -name '*.jar' ! -name '*-sources.jar' -print -quit)"
+          test -n "$JAR"
+          unzip -l "$JAR" | tee packaged-files.txt
+          grep -q 'webrtc-java-0.14.0-linux-aarch64.jar' packaged-files.txt
+
+      - name: Upload native port and mod JARs
         uses: actions/upload-artifact@v4
         with:
-          name: lucy-android-fcl
-          path: build/libs/*.jar
+          name: lucy-android-fcl-native-webrtc
+          path: |
+            build/libs/*.jar
+            ${{ runner.temp }}/webrtc-java/webrtc-jni/target/webrtc-java-0.14.0-linux-aarch64.jar
+            android-native-dependencies.txt
           if-no-files-found: error
