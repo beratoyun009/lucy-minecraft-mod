@@ -91,6 +91,20 @@ jobs:
             -Dwebrtc.src.dir="${RUNNER_TEMP}/webrtc-checkout" \
             -Dwebrtc.install.dir="${RUNNER_TEMP}/webrtc-install"
 
+          # The classifier intentionally keeps the Linux name because FCL's
+          # JVM reports os.name=Linux, but replace Maven Central's desktop
+          # artifact with the Bionic/Android binary built immediately above.
+          NATIVE_JAR="$(find webrtc-jni/target -maxdepth 1 -name 'webrtc-java-0.14.0-linux-aarch64.jar' -print -quit)"
+          test -n "$NATIVE_JAR"
+          mvn -B org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
+            -Dfile="$NATIVE_JAR" \
+            -DgroupId=dev.onvoid.webrtc \
+            -DartifactId=webrtc-java \
+            -Dversion=0.14.0 \
+            -Dpackaging=jar \
+            -Dclassifier=linux-aarch64 \
+            -DgeneratePom=false
+
       - name: Save synchronized WebRTC checkout
         if: always() && steps.webrtc-cache.outputs.cache-hit != 'true'
         continue-on-error: true
@@ -123,6 +137,10 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
+          # setup-java may restore Gradle's cached desktop classifier. Remove
+          # only this dependency so mavenLocal's freshly installed Android
+          # classifier wins without discarding the rest of the Gradle cache.
+          rm -rf "$HOME/.gradle/caches/modules-2/files-2.1/dev.onvoid.webrtc/webrtc-java/0.14.0"
           ./gradlew build --stacktrace
 
       - name: Verify packaged Android WebRTC
@@ -133,6 +151,20 @@ jobs:
           test -n "$JAR"
           unzip -l "$JAR" | tee packaged-files.txt
           grep -q 'webrtc-java-0.14.0-linux-aarch64.jar' packaged-files.txt
+
+          BUILT_NATIVE_JAR="$(find "${RUNNER_TEMP}/webrtc-java/webrtc-jni/target" -maxdepth 1 -name 'webrtc-java-0.14.0-linux-aarch64.jar' -print -quit)"
+          PACKAGED_NATIVE_JAR="${RUNNER_TEMP}/packaged-webrtc-java-linux-aarch64.jar"
+          unzip -p "$JAR" META-INF/jars/webrtc-java-0.14.0-linux-aarch64.jar > "$PACKAGED_NATIVE_JAR"
+          cmp "$BUILT_NATIVE_JAR" "$PACKAGED_NATIVE_JAR"
+
+          PACKAGED_SO="${RUNNER_TEMP}/packaged-libwebrtc-java-linux-aarch64.so"
+          unzip -p "$PACKAGED_NATIVE_JAR" libwebrtc-java-linux-aarch64.so > "$PACKAGED_SO"
+          READELF="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          "$READELF" -d "$PACKAGED_SO" | tee packaged-android-native-dependencies.txt
+          if grep -Eq 'libstdc\+\+|libc\.so\.6|ld-linux|libpulse|libX11|libudev|libdbus' packaged-android-native-dependencies.txt; then
+            echo "Final mod accidentally contains a desktop GNU/Linux native library"
+            exit 1
+          fi
 
       - name: Upload native port and mod JARs
         uses: actions/upload-artifact@v4
