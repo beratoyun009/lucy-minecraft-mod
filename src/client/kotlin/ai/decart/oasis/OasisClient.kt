@@ -169,18 +169,14 @@ object OasisClient : ClientModInitializer {
 		oasisCommand.then(oasisStatusCommand)
 
 		val oasisStartCommand = ClientCommandManager.literal("start")
-
-		if (Utils.MOD_PROD_BUILD) {
-			oasisStartCommand.executes { context ->
-				onStartCommand(context, "oasis-trial-key")
-				1
-			}
-		} else {
-			oasisStartCommand.then(
-				ClientCommandManager.argument("API Key", StringArgumentType.greedyString())
-					.executes { context -> onStartCommand(context, StringArgumentType.getString(context, "API Key").trim()); 1 }
-			)
+		oasisStartCommand.executes { context ->
+			onStartCommand(context, "oasis-trial-key")
+			1
 		}
+		oasisStartCommand.then(
+			ClientCommandManager.argument("API Key", StringArgumentType.greedyString())
+				.executes { context -> onStartCommand(context, StringArgumentType.getString(context, "API Key").trim()); 1 }
+		)
 		oasisCommand.then(oasisStartCommand)
 
 		val oasisStopCommand = ClientCommandManager.literal("stop")
@@ -469,7 +465,7 @@ object OasisClient : ClientModInitializer {
 			}
 			is LucyRestyleIncomingErrorMessage -> {
 				Utils.log("Received error message: ${message.error}")
-				onUnexpectedError(if (message.error == "401: Invalid API key") "Invalid API key" else null)
+				onUnexpectedError(if (message.error.contains("Invalid API key", ignoreCase = true)) "Invalid API key. Use /oasis start <your Decart access key>." else null)
 			}
 			is LucyRestyleIncomingSessionIdMessage -> {}
 			is LucyRestyleIncomingPromptAckMessage -> {}
