@@ -54,7 +54,15 @@ jobs:
           restore-keys: |
             maven-webrtc-java-0.14.0-
 
+      - name: Restore compact compiled WebRTC bundle
+        id: webrtc-install-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/webrtc-install
+          key: webrtc-install-7204-android-arm64-v1
+
       - name: Restore synchronized WebRTC checkout
+        if: steps.webrtc-install-cache.outputs.cache-hit != 'true'
         id: webrtc-cache
         uses: actions/cache/restore@v4
         with:
@@ -105,8 +113,15 @@ jobs:
             -Dclassifier=linux-aarch64 \
             -DgeneratePom=false
 
+      - name: Save compact compiled WebRTC bundle
+        if: success() && steps.webrtc-install-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/webrtc-install
+          key: webrtc-install-7204-android-arm64-v1
+
       - name: Save synchronized WebRTC checkout
-        if: always() && steps.webrtc-cache.outputs.cache-hit != 'true'
+        if: always() && steps.webrtc-install-cache.outputs.cache-hit != 'true' && steps.webrtc-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
