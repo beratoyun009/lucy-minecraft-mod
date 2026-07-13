@@ -65,6 +65,9 @@ jobs:
           mvn -B -pl webrtc-jni -am package \
             -DskipTests \
             -Pandroid-aarch64 \
+            -Dplatform.classifier=linux-aarch64 \
+            -Dplatform.module=webrtc.linux.aarch64 \
+            -Dcmake.toolchain.file=toolchain/aarch64-android-clang.cmake \
             -Dwebrtc.src.dir="${RUNNER_TEMP}/webrtc-checkout" \
             -Dwebrtc.install.dir="${RUNNER_TEMP}/webrtc-install"
 
