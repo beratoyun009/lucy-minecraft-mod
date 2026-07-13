@@ -396,7 +396,7 @@ object OasisClient : ClientModInitializer {
 				stop()
 				return@launch
 			}
-			Utils.log("Config: $config")
+			Utils.log("Session configuration response received: ${config.javaClass.simpleName}")
 
 			// display the error message if there is one
 			when (config) {
@@ -442,9 +442,14 @@ object OasisClient : ClientModInitializer {
 				sendOffer()
 			}
 			override fun onClose(status: Int, reason: String) {
-				onUnexpectedError(if (hasReceivedFrameBack) "Lost connection to the server, please try again later" else null)
+				println("[Oasis 2.0 diagnostics] WebSocket closed: status=$status, reason=$reason")
+				onUnexpectedError(if (hasReceivedFrameBack) "Lost connection to the server, please try again later" else "WebSocket closed: status=$status, reason=${reason.ifBlank { "no reason" }}")
 			}
-			override fun onError(error: Throwable) = onUnexpectedError()
+			override fun onError(error: Throwable) {
+				println("[Oasis 2.0 diagnostics] WebSocket error: ${error.javaClass.simpleName}: ${error.message ?: "no details"}")
+				error.printStackTrace()
+				onUnexpectedError("WebSocket error: ${error.javaClass.simpleName}: ${error.message ?: "no details"}")
+			}
 			override fun onMessage(message: MirageIncomingMessage) = handleMessage(message)
 		})
 	}
@@ -468,8 +473,9 @@ object OasisClient : ClientModInitializer {
 				})
 			}
 			is MirageIncomingErrorMessage -> {
-				Utils.log("Received error message: ${message.error}")
-				onUnexpectedError(if (message.error == "401: Invalid API key") "Invalid API key" else null)
+				val serverError = message.error.trim().ifEmpty { "unknown server error" }
+				println("[Oasis 2.0 diagnostics] Server error: $serverError")
+				onUnexpectedError("Server error: $serverError")
 			}
 			is MirageIncomingSessionIdMessage -> {}
 			is MirageIncomingPromptAckMessage -> {}
@@ -506,6 +512,7 @@ object OasisClient : ClientModInitializer {
 
 		peerConnection = WebRTC.createPeerConnection(object : PeerConnectionObserver {
 			override fun onConnectionChange(state: RTCPeerConnectionState) {
+				println("[Oasis 2.0 diagnostics] Peer connection state: $state")
 				when (state) {
 					RTCPeerConnectionState.CONNECTED -> {
 						isConnected = true
