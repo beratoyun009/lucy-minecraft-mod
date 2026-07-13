@@ -12,8 +12,11 @@ on:
       - "build.gradle"
       - "gradle.properties"
 
+concurrency:
+  group: android-fcl-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
-  actions: write
   contents: read
 
 jobs:
@@ -21,18 +24,6 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
-      - name: Cancel superseded full-fetch run
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          curl --fail-with-body --silent --show-error \
-            --request POST \
-            --header "Accept: application/vnd.github+json" \
-            --header "Authorization: Bearer ${GH_TOKEN}" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/29234675831/cancel" || true
-
       - name: Check out mod source
         uses: actions/checkout@v4
 
@@ -56,7 +47,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/android-native
-          key: webrtc-native-7204-android-arm64-${{ hashFiles('android-fcl/webrtc-java-android.patch') }}
+          key: webrtc-native-7204-android-arm64-fabric-v2-${{ hashFiles('android-fcl/webrtc-java-android.patch') }}
 
       - name: Download verified Android native seed
         if: steps.native-cache.outputs.cache-hit != 'true'
@@ -78,12 +69,74 @@ jobs:
           test -n "$NATIVE_JAR"
           cp "$NATIVE_JAR" "${RUNNER_TEMP}/android-native/webrtc-java-0.14.0-linux-aarch64.jar"
 
+      - name: Add and verify Fabric metadata in Android native JAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NATIVE_JAR="${RUNNER_TEMP}/android-native/webrtc-java-0.14.0-linux-aarch64.jar"
+          test -f "$NATIVE_JAR"
+          python3 - <<'PY'
+          import json
+          import os
+          import tempfile
+          import zipfile
+
+          jar = os.environ["NATIVE_JAR"]
+          metadata = {
+              "schemaVersion": 1,
+              "id": "dev_onvoid_webrtc_webrtc-java_linux-aarch64",
+              "version": "0.14.0",
+              "name": "webrtc-java",
+              "custom": {"fabric-loom:generated": True},
+          }
+
+          fd, replacement = tempfile.mkstemp(
+              prefix="webrtc-java-linux-aarch64-",
+              suffix=".jar",
+              dir=os.path.dirname(jar),
+          )
+          os.close(fd)
+          try:
+              with zipfile.ZipFile(jar, "r") as source:
+                  comment = source.comment
+                  entries = [
+                      (entry, source.read(entry))
+                      for entry in source.infolist()
+                      if entry.filename != "fabric.mod.json"
+                  ]
+
+              with zipfile.ZipFile(replacement, "w") as target:
+                  target.comment = comment
+                  for entry, data in entries:
+                      target.writestr(entry, data)
+
+                  info = zipfile.ZipInfo("fabric.mod.json", (1980, 1, 1, 0, 0, 0))
+                  info.compress_type = zipfile.ZIP_DEFLATED
+                  target.writestr(
+                      info,
+                      json.dumps(metadata, indent=2, separators=(",", ": ")) + "\n",
+                  )
+
+              os.replace(replacement, jar)
+          finally:
+              if os.path.exists(replacement):
+                  os.remove(replacement)
+
+          with zipfile.ZipFile(jar, "r") as verified:
+              names = verified.namelist()
+              assert names.count("fabric.mod.json") == 1, names
+              assert json.loads(verified.read("fabric.mod.json")) == metadata
+              assert "libwebrtc-java-linux-aarch64.so" in names
+          PY
+          unzip -p "$NATIVE_JAR" fabric.mod.json | tee android-native-fabric.mod.json
+          grep -q '"id": "dev_onvoid_webrtc_webrtc-java_linux-aarch64"' android-native-fabric.mod.json
+
       - name: Save compact Android native JAR
         if: steps.native-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/android-native
-          key: webrtc-native-7204-android-arm64-${{ hashFiles('android-fcl/webrtc-java-android.patch') }}
+          key: webrtc-native-7204-android-arm64-fabric-v2-${{ hashFiles('android-fcl/webrtc-java-android.patch') }}
 
       - name: Verify and install Android native classifier
         shell: bash
@@ -145,6 +198,20 @@ jobs:
           unzip -p "$JAR" META-INF/jars/webrtc-java-0.14.0-linux-aarch64.jar > "$PACKAGED_NATIVE_JAR"
           cmp "$BUILT_NATIVE_JAR" "$PACKAGED_NATIVE_JAR"
 
+          unzip -p "$PACKAGED_NATIVE_JAR" fabric.mod.json > packaged-native-fabric.mod.json
+          python3 - <<'PY'
+          import json
+          with open("packaged-native-fabric.mod.json", encoding="utf-8") as source:
+              metadata = json.load(source)
+          assert metadata == {
+              "schemaVersion": 1,
+              "id": "dev_onvoid_webrtc_webrtc-java_linux-aarch64",
+              "version": "0.14.0",
+              "name": "webrtc-java",
+              "custom": {"fabric-loom:generated": True},
+          }
+          PY
+
           PACKAGED_SO="${RUNNER_TEMP}/packaged-libwebrtc-java-linux-aarch64.so"
           unzip -p "$PACKAGED_NATIVE_JAR" libwebrtc-java-linux-aarch64.so > "$PACKAGED_SO"
           readelf -d "$PACKAGED_SO" | tee packaged-android-native-dependencies.txt
@@ -161,5 +228,7 @@ jobs:
           path: |
             build/libs/*.jar
             android-native-dependencies.txt
+            android-native-fabric.mod.json
             packaged-android-native-dependencies.txt
+            packaged-native-fabric.mod.json
           if-no-files-found: error
